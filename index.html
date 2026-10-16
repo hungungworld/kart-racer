@@ -84,6 +84,8 @@
     <div class="stats" id="kartStats"></div>
     <h2>색상</h2>
     <div class="row" id="colorSel"></div>
+    <h2>모드</h2>
+    <div class="row" id="modeSel"></div>
     <h2>난이도</h2>
     <div class="row" id="diffSel"></div>
     <div class="btns">
@@ -96,7 +98,10 @@
         <kbd>↑</kbd> 가속 &nbsp; <kbd>↓</kbd> 브레이크/후진 &nbsp; <kbd>←</kbd><kbd>→</kbd> 조향<br>
         <kbd>Shift</kbd> 드리프트 (방향키와 함께) — 부스터 게이지 충전<br>
         <kbd>Ctrl</kbd> 또는 <kbd>Z</kbd> 니트로 부스터 사용<br>
-        드리프트를 0.4초 이상 유지하고 떼면 <b>순간 부스터</b>!<br>
+        <kbd>Space</kbd> 또는 <kbd>X</kbd> 아이템 사용 (아이템전: ? 상자를 지나가면 획득)<br>
+        드리프트를 오래 유지할수록 불꽃 색이 바뀌고 더 강한 순간 부스터!<br>
+        앞차 바로 뒤에 붙어 달리면 <b>슬립스트림</b>, 점프대 착지 시 <b>착지 부스터</b><br>
+        드리프트를 0.5초 이상 유지하고 떼면 <b>순간 부스터</b>!<br>
         출발 신호(GO) 직전에 <kbd>↑</kbd>를 누르면 <b>출발 부스터</b>!<br>
         잔디에 빠졌을 때 <kbd>T</kbd> (또는 <kbd>Backspace</kbd>) 트랙 복귀<br>
         <kbd>R</kbd> 재시작 &nbsp; <kbd>Esc</kbd> 메뉴 &nbsp; <kbd>M</kbd> 소리 켜기/끄기
@@ -128,7 +133,8 @@
   <div class="tb" data-k="right" style="left:104px;bottom:96px">▶</div>
   <div class="tb" data-k="down" style="left:60px;bottom:14px">▼</div>
   <div class="tb" data-k="up" style="right:16px;bottom:14px;width:86px;height:86px">가속</div>
-  <div class="tb" data-k="drift" style="right:116px;bottom:22px">드리프트</div>
+  <div class="tb" data-k="drift" style="right:128px;bottom:18px">드리프트</div>
+  <div class="tb" data-k="item" style="right:132px;bottom:112px">아이템</div>
   <div class="tb" data-k="boost" style="right:40px;bottom:116px">부스터</div>
   <div class="tb small" data-k="respawn" style="left:192px;bottom:104px">복귀</div>
 </div>
@@ -245,6 +251,18 @@ function buildTrack(def) {
     const ax = a[0] - 2 * b[0] + c[0], ay = a[1] - 2 * b[1] + c[1];
     tr.inner[i] = ax * nx[i] + ay * ny[i] >= 0 ? 1 : -1;
   }
+  // 점프대: 가장 곧은 구간 한 곳 (부스터 패드·아이템 상자 줄과 떨어진 곳)
+  tr.ramps = [];
+  {
+    let best = -1, bs = 1e9;
+    for (let i = Math.floor(N * 0.28); i < Math.floor(N * 0.92); i++) {
+      const near = f => Math.min(Math.abs(f - i), N - Math.abs(f - i)) < 30;
+      if (tr.pads.some(p => near(p.idx)) || [0.2, 0.5, 0.78].some(f => near(Math.floor(f * N)))) continue;
+      let sc = 0; for (let d = -25; d <= 25; d++) sc += Math.abs(tr.curv[(i + d + N) % N]);
+      if (sc < bs) { bs = sc; best = i; }
+    }
+    if (best >= 0) tr.ramps.push({ idx: best });
+  }
   // 자연물 배치
   let seed = 1234 + def.name.length * 97;
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -336,21 +354,22 @@ const Sound = {
 };
 
 // ===================== 입력 =====================
-const input = { up: false, down: false, left: false, right: false, drift: false, boost: false, respawn: false };
-let boostPressed = false, respawnPressed = false, upPressTime = -1;
+const input = { up: false, down: false, left: false, right: false, drift: false, boost: false, respawn: false, item: false };
+let boostPressed = false, respawnPressed = false, itemPressed = false, upPressTime = -1;
 const KEYMAP = {
   ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
-  ShiftLeft: 'drift', ShiftRight: 'drift', ControlLeft: 'boost', ControlRight: 'boost', KeyZ: 'boost', KeyT: 'respawn'
+  ShiftLeft: 'drift', ShiftRight: 'drift', ControlLeft: 'boost', ControlRight: 'boost', KeyZ: 'boost', KeyT: 'respawn', KeyX: 'item', Space: 'item'
 };
 function setKey(k, v) {
   if (k === 'boost' && v && !input.boost) boostPressed = true;
   if (k === 'respawn' && v && !input.respawn) respawnPressed = true;
+  if (k === 'item' && v && !input.item) itemPressed = true;
   if (k === 'up' && v && !input.up) upPressTime = performance.now();
   input[k] = v;
 }
 window.addEventListener('keydown', e => {
   if (e.target && e.target.tagName === 'INPUT') return; // 이름/코드 입력 중
-  const k = KEYMAP[e.code] || (e.code === 'Backspace' && game.state !== 'menu' ? 'respawn' : null);
+  const k = (e.code === 'Space' && game.state === 'menu') ? null : (KEYMAP[e.code] || (e.code === 'Backspace' && game.state !== 'menu' ? 'respawn' : null));
   if (k) { setKey(k, true); e.preventDefault(); }
   if (e.code === 'KeyR' && game.state !== 'menu') restartRace();
   if (e.code === 'Escape' && game.state !== 'menu') leaveRace();
@@ -390,10 +409,12 @@ const KARTS = [
   { id: 'buggy', name: '버기', desc: '오프로드', top: 0.97, accel: 1.03, off: 0.9, gauge: 0.95, steer: 0.97 },
   { id: 'classic', name: '클래식', desc: '가속·부스터', top: 0.97, accel: 1.12, off: 0.74, gauge: 1.18, steer: 1 },
 ];
-const settings = { track: 0, color: 1, diff: 1, char: 'helmet', kart: 'racer', name: '', bots: true };
+const settings = { track: 0, color: 1, diff: 1, char: 'helmet', kart: 'racer', name: '', bots: true, mode: 'item' };
+const MODES = [{ id: 'item', name: '아이템전' }, { id: 'speed', name: '스피드전' }];
 try { Object.assign(settings, JSON.parse(localStorage.getItem('kart.settings') || '{}')); } catch (e) {}
 if (!CHARS.some(c => c.id === settings.char)) settings.char = 'helmet';
 if (!KARTS.some(c => c.id === settings.kart)) settings.kart = 'racer';
+if (!MODES.some(m => m.id === settings.mode)) settings.mode = 'item';
 if (!settings.name) settings.name = '레이서' + Math.floor(10 + Math.random() * 90);
 function saveSettings() { try { localStorage.setItem('kart.settings', JSON.stringify(settings)); } catch (e) {} }
 const kartStats = id => KARTS.find(k => k.id === id) || KARTS[0];
@@ -410,6 +431,7 @@ function makeKart(name, color, isPlayer, char = 'helmet', kart = 'racer') {
     idx: 0, lap: 0, maxLap: 0, lapStart: 0, lapTimes: [], finished: false, finishTime: 0,
     gauge: 0, nitro: 0, boost: 0, boostKind: '', drift: false, driftDir: 0, driftTime: 0, onRoad: true,
     steerVis: 0, wrongWay: 0, bumpCd: 0,
+    items: [], rolling: 0, pending: null, spin: 0, bubble: 0, flip: 0, shield: 0, z: 0, vz: 0, airT: 0, draftT: 0,
     ai: isPlayer ? null : { offset: 0, offTarget: 0, offTimer: 0, skill: 1, stuck: 0, reverse: 0, nitroDelay: 2 + Math.random() * 3 }
   };
 }
@@ -491,6 +513,7 @@ function setupRace(roster) {
   game.cam.h = player.h; game.cam.fov = 60;
   Gfx.setTrack(tr); Gfx.setKarts(game.karts);
   game.best = loadBest();
+  setupItems();
 }
 
 function loadBest() { try { return parseFloat(localStorage.getItem('kart.best.' + settings.track)) || 0; } catch (e) { return 0; } }
@@ -507,6 +530,256 @@ function showMenu() {
 }
 
 function message(text, color = '#ffd23f', dur = 1.2) { game.messages.push({ text, color, t: dur, dur }); }
+
+// ===================== 아이템전 =====================
+const ITEM_DEFS = {
+  booster: { icon: '🚀', name: '부스터' },
+  banana: { icon: '🍌', name: '바나나' },
+  bomb: { icon: '💧', name: '물폭탄' },
+  missile: { icon: '🎯', name: '미사일' },
+  shield: { icon: '🛡️', name: '실드' },
+};
+const ITEM_KEYS = Object.keys(ITEM_DEFS);
+const BOX_ROWS = [0.2, 0.5, 0.78];
+const BOX_OFFS = [-66, -22, 22, 66];
+let hazardSeq = 0;
+
+function setupItems() {
+  const tr = game.track, N = tr.N;
+  game.hazards = [];
+  game.boxes = [];
+  if (settings.mode !== 'item') return;
+  for (const fr of BOX_ROWS) {
+    const i = Math.floor(fr * N) % N;
+    for (const off of BOX_OFFS) game.boxes.push({ x: tr.pts[i][0] + tr.nx[i] * off, y: tr.pts[i][1] + tr.ny[i] * off, idx: i, t: 0 });
+  }
+}
+
+// 순위가 낮을수록 강한 아이템이 잘 나온다
+function rollItem(k) {
+  const r = ranking(), pos = r.length > 1 ? r.indexOf(k) / (r.length - 1) : 0.5;
+  const w = { booster: 10 + 30 * pos, banana: 34 - 24 * pos, bomb: 22, missile: pos === 0 ? 0 : 6 + 34 * pos, shield: 26 - 12 * pos };
+  let total = 0; for (const key in w) total += w[key];
+  let x = Math.random() * total;
+  for (const key in w) { x -= w[key]; if (x <= 0) return key; }
+  return 'booster';
+}
+
+function kartAhead(k) {
+  const r = ranking(), i = r.indexOf(k);
+  for (let j = i - 1; j >= 0; j--) if (!r[j].finished) return r[j];
+  return null;
+}
+
+function addHazard(h, broadcast) {
+  if (game.hazards.some(q => q.id === h.id)) return;
+  game.hazards.push(h);
+  if (broadcast) Net.sendEvent({ k: 'hz', h });
+}
+function removeHazard(id, broadcast) {
+  const i = game.hazards.findIndex(q => q.id === id);
+  if (i >= 0) game.hazards.splice(i, 1);
+  if (broadcast) Net.sendEvent({ k: 'rm', id });
+}
+
+function useItem(k) {
+  const it = k.items.shift();
+  if (!it) return;
+  const fx = Math.cos(k.h), fy = Math.sin(k.h);
+  const id = (k.pid || 'k') + '-' + (++hazardSeq);
+  const base = { id, owner: k.pid, t: 0 };
+  if (it === 'booster') {
+    k.boost = 1.7; k.boostKind = 'nitro';
+    if (k.isPlayer) { Sound.whoosh(1.0, 0.55, 700); message('부스터!', '#ff7f11', 0.8); }
+  } else if (it === 'shield') {
+    k.shield = 6;
+    if (k.isPlayer) { Sound.beep(660, 0.1, 'sine', 0.2); setTimeout(() => Sound.beep(990, 0.18, 'sine', 0.2), 90); message('실드!', '#7fdcff', 0.8); }
+  } else if (it === 'banana') {
+    addHazard({ ...base, kind: 'banana', x: k.x - fx * 28, y: k.y - fy * 28, vx: 0, vy: 0 }, true);
+    if (k.isPlayer) Sound.beep(300, 0.12, 'triangle', 0.25);
+  } else if (it === 'bomb') {
+    const sp = Math.max(0, k.fwd) + 420;
+    addHazard({ ...base, kind: 'bomb', x: k.x + fx * 24, y: k.y + fy * 24, vx: fx * sp, vy: fy * sp }, true);
+    if (k.isPlayer) Sound.whoosh(0.5, 0.3, 500);
+  } else if (it === 'missile') {
+    const target = kartAhead(k);
+    addHazard({ ...base, kind: 'missile', x: k.x + fx * 26, y: k.y + fy * 26, vx: fx * 950, vy: fy * 950, target: target ? target.pid : '' }, true);
+    if (k.isPlayer) { Sound.whoosh(0.8, 0.5, 300); message(target ? `${target.name}에게 미사일!` : '미사일 발사!', '#ff5d73', 1); }
+  }
+}
+
+function hitKart(k, kind) {
+  if (k.ghost > 0 || k.remote) return false;
+  if (k.shield > 0) {
+    k.shield = 0;
+    for (let i = 0; i < 24; i++) { const a = Math.random() * TAU; spawn(k.x + Math.cos(a) * 20, k.y + Math.sin(a) * 20, 12, Math.cos(a) * 120, Math.sin(a) * 120, 30, 0.5, 'blue'); }
+    if (k.isPlayer) { Sound.beep(520, 0.2, 'sine', 0.25); message('실드로 막았다!', '#7fdcff', 1); }
+    return true;
+  }
+  k.drift = false; k.boost = 0; k.mood = 'angry'; k.moodT = 1.6;
+  if (kind === 'banana') {
+    k.spin = 1.0;
+    if (k.isPlayer) { Sound.beep(500, 0.5, 'sawtooth', 0.15); message('미끄덩!', '#ffd23f', 1); }
+  } else if (kind === 'bomb') {
+    k.bubble = 1.5;
+    for (let i = 0; i < 20; i++) spawn(k.x, k.y, 10, (Math.random() - 0.5) * 120, (Math.random() - 0.5) * 120, 40 + Math.random() * 40, 0.8, 'water');
+    if (k.isPlayer) { Sound.beep(880, 0.08, 'sine', 0.2); setTimeout(() => Sound.beep(1200, 0.12, 'sine', 0.2), 80); message('물방울에 갇혔어요!', '#8fd6ff', 1.2); }
+  } else if (kind === 'missile') {
+    k.flip = 1.3; k.vz = 360; k.z = Math.max(k.z || 0, 1);
+    explosion(k.x, k.y);
+    if (k.isPlayer) { message('으악! 미사일에 맞았어요', '#ff5d73', 1.3); game.shake = 14; }
+  }
+  return true;
+}
+
+function explosion(x, y) {
+  for (let i = 0; i < 40; i++) {
+    const a = Math.random() * TAU, s = 60 + Math.random() * 220;
+    spawn(x, y, 8 + Math.random() * 10, Math.cos(a) * s, Math.sin(a) * s, 40 + Math.random() * 120, 0.5 + Math.random() * 0.4, i % 3 ? 'fire' : 'boom');
+  }
+  for (let i = 0; i < 14; i++) spawn(x, y, 10, (Math.random() - 0.5) * 140, (Math.random() - 0.5) * 140, 30, 1.2, 'smoke');
+  const p = game.player;
+  if (p && Math.hypot(p.x - x, p.y - y) < 900) { Sound.whoosh(0.7, 0.6, 140); Sound.beep(70, 0.4, 'sawtooth', 0.3); game.shake = Math.max(game.shake || 0, 8); }
+}
+
+// 매 스텝: 아이템 상자, 장애물, 슬립스트림, 점프대
+function updateItems(dt) {
+  const tr = game.track;
+  // 아이템 상자
+  for (const b of game.boxes) {
+    if (b.t > 0) { b.t -= dt; continue; }
+    for (const k of game.karts) {
+      if (k.remote || k.finished && !k.isPlayer) continue;
+      if (Math.hypot(k.x - b.x, k.y - b.y) > 24) continue;
+      b.t = 2.5;
+      for (let i = 0; i < 12; i++) spawn(b.x, b.y, 14, (Math.random() - 0.5) * 160, (Math.random() - 0.5) * 160, 60, 0.5, 'confetti');
+      if (k.items.length + (k.rolling > 0 ? 1 : 0) < 2) {
+        k.rolling = 0.8; k.pending = rollItem(k);
+        if (k.isPlayer) Sound.beep(1040, 0.08, 'square', 0.12);
+      }
+      break;
+    }
+  }
+  // 장애물
+  for (let i = game.hazards.length - 1; i >= 0; i--) {
+    const h = game.hazards[i];
+    h.t += dt;
+    if (h.kind === 'bomb') {
+      if (h.t < 0.65) { h.x += h.vx * dt; h.y += h.vy * dt; h.z = Math.sin(h.t / 0.65 * PI) * 45 + 6; }
+      else if (!h.landed) { h.landed = true; h.z = 0; for (let j = 0; j < 30; j++) spawn(h.x, h.y, 6, (Math.random() - 0.5) * 220, (Math.random() - 0.5) * 220, 60 + Math.random() * 60, 0.7, 'water'); }
+      if (h.t > 0.65 + 2.2) { game.hazards.splice(i, 1); continue; }
+    } else if (h.kind === 'missile') {
+      const tgt = h.target && game.karts.find(k => k.pid === h.target);
+      if (tgt) {
+        const want = Math.atan2(tgt.y - h.y, tgt.x - h.x), cur = Math.atan2(h.vy, h.vx);
+        const a = cur + clamp(wrapA(want - cur), -4.5 * dt, 4.5 * dt);
+        h.vx = Math.cos(a) * 950; h.vy = Math.sin(a) * 950;
+      }
+      h.x += h.vx * dt; h.y += h.vy * dt; h.z = 12;
+      if (Math.random() < 0.8) spawn(h.x - h.vx * 0.02, h.y - h.vy * 0.02, 12, 0, 0, 10, 0.5, 'smoke');
+      spawn(h.x - h.vx * 0.015, h.y - h.vy * 0.015, 12, 0, 0, 0, 0.15, 'fire');
+      if (h.t > 4) { explosion(h.x, h.y); game.hazards.splice(i, 1); continue; }
+      // 원격 대상에 도달하면 우리 화면에서는 폭발만 보여주고 판정은 상대 쪽에서
+      if (tgt && tgt.remote && Math.hypot(tgt.x - h.x, tgt.y - h.y) < 24) { explosion(h.x, h.y); game.hazards.splice(i, 1); continue; }
+    }
+    const R = h.kind === 'banana' ? 17 : h.kind === 'missile' ? 24 : (h.kind === 'bomb' && h.landed) ? 52 : -1;
+    if (R < 0) continue;
+    for (const k of game.karts) {
+      if (k.remote || (k.z || 0) > 20) continue;
+      if (h.kind === 'missile' && h.target && k.pid !== h.target) continue;
+      if (k.pid === h.owner && h.t < 0.6) continue;
+      if (h.kind === 'bomb' && k.bubble > 0) continue;
+      if (Math.hypot(k.x - h.x, k.y - h.y) > R) continue;
+      hitKart(k, h.kind);
+      if (h.kind !== 'bomb') { game.hazards.splice(i, 1); Net.sendEvent({ k: 'rm', id: h.id }); break; }
+    }
+  }
+}
+
+// 카트별 상태 (updateKart 시작에서 호출) — 조작 불능이면 입력을 비운다
+function kartStatus(k, inp, dt) {
+  if (k.rolling > 0) {
+    k.rolling -= dt;
+    if (k.rolling <= 0 && k.pending) {
+      k.items.push(k.pending); k.pending = null;
+      if (k.isPlayer) { Sound.beep(784, 0.08, 'square', 0.15); setTimeout(() => Sound.beep(1175, 0.15, 'square', 0.15), 80); }
+    }
+  }
+  k.spin = Math.max(0, (k.spin || 0) - dt);
+  k.bubble = Math.max(0, (k.bubble || 0) - dt);
+  k.flip = Math.max(0, (k.flip || 0) - dt);
+  k.shield = Math.max(0, (k.shield || 0) - dt);
+  if (k.spin > 0 || k.bubble > 0 || k.flip > 0) {
+    k.drift = false;
+    return { up: false, down: false, steer: 0, drift: false, boost: false, item: false, respawn: false };
+  }
+  if (inp.item && k.items.length && game.state === 'race') useItem(k);
+  return inp;
+}
+
+// 슬립스트림: 앞차 뒤에 바짝 붙어 달리면 바람을 타고 부스트
+function updateDraft(k, dt) {
+  if (k.boost > 0 || k.fwd < 300 || (k.z || 0) > 0) { k.draftT = 0; return; }
+  const fx = Math.cos(k.h), fy = Math.sin(k.h);
+  let found = false;
+  for (const o of game.karts) {
+    if (o === k) continue;
+    const dx = o.x - k.x, dy = o.y - k.y, along = dx * fx + dy * fy, side = Math.abs(-dx * fy + dy * fx);
+    if (along > 30 && along < 170 && side < 22) { found = true; break; }
+  }
+  k.draftT = found ? (k.draftT || 0) + dt : Math.max(0, (k.draftT || 0) - dt * 2);
+  if (found && Math.random() < 0.5) spawn(k.x + fx * 30 + (Math.random() - 0.5) * 30, k.y + fy * 30 + (Math.random() - 0.5) * 30, 8 + Math.random() * 14, -fx * 300, -fy * 300, 0, 0.25, 'wind');
+  if (k.draftT > 1.3) {
+    k.draftT = 0; k.boost = 0.9; k.boostKind = 'pad';
+    if (k.isPlayer) { Sound.whoosh(0.6, 0.4, 900); message('슬립스트림!', '#b6f0ff', 0.9); }
+  }
+}
+
+// 점프대 & 공중 처리
+function updateAir(k, loc, dt) {
+  const tr = game.track;
+  if (!(k.z > 0) && !(k.vz > 0)) {
+    for (const rp of tr.ramps) {
+      let di = k.idx - rp.idx; if (di > tr.N / 2) di -= tr.N; if (di < -tr.N / 2) di += tr.N;
+      if (di >= -1 && di <= 1 && Math.abs(loc.off) < 62 && k.fwd > 180) {
+        k.vz = 230 + k.fwd * 0.3; k.z = 1; k.airT = 0; k.drift = false;
+        if (k.isPlayer) Sound.whoosh(0.5, 0.35, 400);
+      }
+    }
+    return;
+  }
+  k.vz -= 1150 * dt; k.z += k.vz * dt; k.airT = (k.airT || 0) + dt;
+  if (k.z <= 0) {
+    k.z = 0; k.vz = 0;
+    for (let i = 0; i < 10; i++) spawn(k.x, k.y, 2, (Math.random() - 0.5) * 160, (Math.random() - 0.5) * 160, 20, 0.6, k.onRoad ? 'smoke' : 'dirt');
+    if (k.airT > 0.35 && k.flip <= 0) {
+      k.boost = Math.max(k.boost, 0.6); k.boostKind = 'pad';
+      if (k.isPlayer) { Sound.whoosh(0.4, 0.35, 1100); message('착지 부스터!', '#7fdcff', 0.8); }
+    }
+    k.airT = 0;
+  }
+}
+
+function finishConfetti(k) {
+  for (let i = 0; i < 160; i++) spawn(k.x + (Math.random() - 0.5) * 200, k.y + (Math.random() - 0.5) * 200, 80 + Math.random() * 80,
+    (Math.random() - 0.5) * 80, (Math.random() - 0.5) * 80, -30 - Math.random() * 40, 2 + Math.random() * 1.5, 'confetti');
+}
+
+// 봇의 아이템 사용 판단
+function aiItem(k, dt, inp) {
+  if (!k.items.length) { k.ai.itemT = 0; return; }
+  k.ai.itemT = (k.ai.itemT || 0) + dt;
+  const it = k.items[0], T = k.ai.itemT;
+  if (T < 0.6) return;
+  const ahead = kartAhead(k);
+  const dAhead = ahead ? Math.hypot(ahead.x - k.x, ahead.y - k.y) : 1e9;
+  let go = false;
+  if (it === 'booster' || it === 'shield') go = T > 1.2;
+  else if (it === 'banana') go = game.karts.some(o => o !== k && Math.hypot(o.x - k.x, o.y - k.y) < 160 && ((o.x - k.x) * Math.cos(k.h) + (o.y - k.y) * Math.sin(k.h)) < 0) || T > 6;
+  else if (it === 'bomb') go = dAhead < 380 || T > 5;
+  else if (it === 'missile') go = (ahead && dAhead < 900) || T > 5;
+  if (go) { inp.item = true; k.ai.itemT = 0; }
+}
 
 // ===================== AI =====================
 function aiInput(k, dt) {
@@ -540,6 +813,8 @@ function aiInput(k, dt) {
   if (k.gauge >= 100) { k.gauge -= 100; k.nitro = Math.min(2, k.nitro + 1); }
   if (k.nitro > 0 && sharp < 0.2 && ai.nitroDelay <= 0 && k.boost <= 0) { inp.boost = true; ai.nitroDelay = 2 + Math.random() * 4; }
 
+  inp.item = false;
+  if (settings.mode === 'item') aiItem(k, dt, inp);
   // 끼임 탈출
   if (!k.onRoad && k.offTime > 3) respawn(k);
   if (ai.reverse > 0) { ai.reverse -= dt; inp.up = false; inp.down = true; inp.steer = -inp.steer; }
@@ -552,9 +827,9 @@ function playerInput(k) {
   const inp = {
     up: input.up, down: input.down,
     steer: (input.right ? 1 : 0) - (input.left ? 1 : 0),
-    drift: input.drift, boost: boostPressed, respawn: respawnPressed
+    drift: input.drift, boost: boostPressed, respawn: respawnPressed, item: itemPressed
   };
-  boostPressed = false; respawnPressed = false;
+  boostPressed = false; respawnPressed = false; itemPressed = false;
   k.topMul = 1;
   return inp;
 }
@@ -566,7 +841,9 @@ function updateKart(k, inp, dt) {
   if (inp.respawn && game.state === 'race') respawn(k);
   k.ghost = Math.max(0, k.ghost - dt);
   k.moodT = Math.max(0, (k.moodT || 0) - dt);
-  if (k.boost > 0) inp.up = true;
+  inp = kartStatus(k, inp, dt);
+  const air = k.z > 0;
+  if (k.boost > 0 && !(k.spin > 0 || k.bubble > 0 || k.flip > 0)) inp.up = true;
   // 조향 (저속에서도 방향을 틀 수 있게 해서 잔디/벽에서 쉽게 빠져나오도록)
   let sf = clamp(Math.abs(k.fwd) / 120, 0, 1);
   if ((inp.up || inp.down) && sf < 0.55) sf = 0.55;
@@ -574,8 +851,9 @@ function updateKart(k, inp, dt) {
   let turn;
   if (k.drift) turn = (k.driftDir * 1.25 + inp.steer * 0.95) * sf;
   else turn = inp.steer * 2.55 * sf * (1 - Math.min(0.3, Math.abs(k.fwd) / MAX_SPEED * 0.3));
-  turn *= ks.steer;
+  turn *= ks.steer * (air ? 0.35 : 1);
   k.h += turn * dt;
+  if (k.spin > 0) k.h += 13 * dt * Math.min(1, k.spin * 2);
   k.steerVis = lerp(k.steerVis, inp.steer, dt * 10);
 
   const fx = Math.cos(k.h), fy = Math.sin(k.h), rx = -fy, ry = fx;
@@ -594,9 +872,12 @@ function updateKart(k, inp, dt) {
     fwd -= sign(fwd) * Math.min(Math.abs(fwd), 140 * dt);
   }
   if (fwd > top) fwd -= (fwd - top) * Math.min(1, (k.onRoad ? 1.2 : 1.6) * dt);
+  if (k.spin > 0) fwd *= Math.exp(-2.4 * dt);
+  if (k.flip > 0) fwd *= Math.exp(-2.8 * dt);
+  if (k.bubble > 0) { fwd *= Math.exp(-7 * dt); lat *= Math.exp(-7 * dt); }
 
   // 드리프트
-  if (!k.drift && inp.drift && inp.steer !== 0 && fwd > 200) {
+  if (!k.drift && inp.drift && inp.steer !== 0 && fwd > 200 && !air) {
     k.drift = true; k.driftDir = inp.steer; k.driftTime = 0;
     lat -= inp.steer * 40; // 뒤가 미끄러지는 느낌
   }
@@ -605,7 +886,11 @@ function updateKart(k, inp, dt) {
     fwd -= fwd * 0.12 * dt;
     if (!inp.drift || fwd < 120) {
       k.drift = false;
-      if (k.driftTime > 0.4 && fwd > 150) {
+      // 드리프트 단계별 순간 부스터 (파란 불꽃 → 주황 불꽃)
+      if (k.driftTime > 1.2 && fwd > 150) {
+        k.boost = Math.max(k.boost, 0.95); k.boostKind = 'mini2';
+        if (k.isPlayer) { Sound.whoosh(0.6, 0.4, 900); message('슈퍼 순간 부스터!', '#ff9f43', 0.8); }
+      } else if (k.driftTime > 0.5 && fwd > 150) {
         k.boost = Math.max(k.boost, 0.45); k.boostKind = 'mini';
         if (k.isPlayer) { Sound.whoosh(0.35, 0.25, 1200); message('순간 부스터!', '#7fdcff', 0.7); }
       }
@@ -617,7 +902,7 @@ function updateKart(k, inp, dt) {
       }
     }
   }
-  const grip = k.drift ? 2.4 : (k.onRoad ? 9 : 8);
+  const grip = k.drift ? 2.4 : (k.onRoad ? 18 : 12);
   const latLoss = Math.abs(lat) * (1 - Math.exp(-grip * dt));
   lat *= Math.exp(-grip * dt);
   // 드리프트 중 미끄러지는 속도 일부를 전진 속도로 되돌려 속도 유지
@@ -641,6 +926,8 @@ function updateKart(k, inp, dt) {
   k.onRoad = Math.abs(loc.off) < ROAD / 2 + 4;
   k.lastOff = loc.off;
   if (!k.onRoad && Math.abs(k.fwd) < 140) k.offTime += dt; else k.offTime = 0;
+  updateAir(k, loc, dt);
+  updateDraft(k, dt);
   // 펜스 충돌
   const lim = ROAD / 2 + FENCE - KART_R;
   if (Math.abs(loc.off) > lim) {
@@ -662,7 +949,7 @@ function updateKart(k, inp, dt) {
   // 부스터 패드
   for (const pad of tr.pads) {
     let di = Math.abs(k.idx - pad.idx); di = Math.min(di, tr.N - di);
-    if (di <= 2 && Math.abs(loc.off - pad.off) < 42) {
+    if (di <= 2 && Math.abs(loc.off - pad.off) < 42 && !air) {
       if (k.boost < 0.5 && k.isPlayer) Sound.whoosh(0.5, 0.35, 1000);
       k.boost = Math.max(k.boost, 0.9); if (k.boostKind !== 'nitro') k.boostKind = 'pad';
     }
@@ -702,7 +989,7 @@ function kartFx(k) {
   const fx = Math.cos(k.h), fy = Math.sin(k.h), rx = -fy, ry = fx, lat = k.lat || 0;
   const rearX = k.x - fx * 13, rearY = k.y - fy * 13;
   const wl = [rearX + rx * 9, rearY + ry * 9], wr = [rearX - rx * 9, rearY - ry * 9];
-  if ((k.drift || Math.abs(lat) > 120) && k.onRoad) {
+  if ((k.drift || Math.abs(lat) > 260) && k.onRoad && !(k.z > 0)) {
     if (k.lastW) {
       Gfx.addSkid(k.lastW[0][0], k.lastW[0][1], wl[0], wl[1]);
       Gfx.addSkid(k.lastW[1][0], k.lastW[1][1], wr[0], wr[1]);
@@ -710,10 +997,14 @@ function kartFx(k) {
     k.lastW = [wl, wr];
     if (Math.random() < 0.6) spawn(rearX, rearY, 3, (Math.random() - 0.5) * 40 + k.vx * 0.2, (Math.random() - 0.5) * 40 + k.vy * 0.2, 14, 0.9, 'smoke');
   } else k.lastW = null;
+  if (k.drift && k.driftTime > 0.5 && k.onRoad) {
+    const kind = k.driftTime > 1.2 ? 'spark2' : 'spark1';
+    for (const w of [wl, wr]) spawn(w[0], w[1], 2, (Math.random() - 0.5) * 120 - fx * 60, (Math.random() - 0.5) * 120 - fy * 60, 30 + Math.random() * 50, 0.28, kind);
+  }
   if (k.boost > 0) {
     const exX = k.x - fx * 20 - rx * 6, exY = k.y - fy * 20 - ry * 6;
     for (let i = 0; i < 2; i++) spawn(exX + (Math.random() - 0.5) * 3, exY + (Math.random() - 0.5) * 3, 8.5,
-      -fx * 160 + (Math.random() - 0.5) * 40 + k.vx * 0.7, -fy * 160 + (Math.random() - 0.5) * 40 + k.vy * 0.7, (Math.random() - 0.3) * 20, 0.22, k.boostKind === 'nitro' ? 'fire' : 'blue');
+      -fx * 160 + (Math.random() - 0.5) * 40 + k.vx * 0.7, -fy * 160 + (Math.random() - 0.5) * 40 + k.vy * 0.7, (Math.random() - 0.3) * 20, 0.22, (k.boostKind === 'nitro' || k.boostKind === 'mini2') ? 'fire' : 'blue');
   }
   if (!k.onRoad && Math.abs(k.fwd) > 100 && Math.random() < 0.5) spawn(rearX, rearY, 3, (Math.random() - 0.5) * 50, (Math.random() - 0.5) * 50, 18, 0.8, 'dirt');
 }
@@ -722,7 +1013,7 @@ function collideKarts() {
   const ks = game.karts;
   for (let i = 0; i < ks.length; i++) for (let j = i + 1; j < ks.length; j++) {
     const a = ks[i], b = ks[j];
-    if ((a.remote && b.remote) || a.ghost > 0 || b.ghost > 0) continue;
+    if ((a.remote && b.remote) || a.ghost > 0 || b.ghost > 0 || Math.abs((a.z || 0) - (b.z || 0)) > 15) continue;
     const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), min = KART_R * 2;
     if (d < min && d > 0.01) {
       const nx = dx / d, ny = dy / d;
@@ -741,9 +1032,12 @@ function collideKarts() {
   }
 }
 
+const CONFETTI = [[1, 0.36, 0.45], [1, 0.82, 0.25], [0.18, 0.77, 0.71], [0.48, 0.38, 1], [0.3, 0.6, 1], [1, 0.5, 0.1]];
 function spawn(x, y, z, vx, vy, vz, life, kind) {
-  if (game.particles.length > 1200) return;
-  game.particles.push({ x, y, z, vx, vy, vz, life, max: life, kind });
+  if (game.particles.length > 1500) return;
+  const p = { x, y, z, vx, vy, vz, life, max: life, kind };
+  if (kind === 'confetti') p.c = CONFETTI[Math.floor(Math.random() * CONFETTI.length)];
+  game.particles.push(p);
 }
 
 // 트랙 복귀: 가장 가까운 도로 위로 옮기고 잠깐 무적
@@ -762,6 +1056,7 @@ function onPlayerFinish() {
   const pos = ranking().indexOf(p) + 1;
   message(pos === 1 ? '1등! 우승!' : `${pos}등으로 완주!`, '#ffd23f', 3);
   Sound.beep(523, 0.2); setTimeout(() => Sound.beep(659, 0.2), 180); setTimeout(() => Sound.beep(784, 0.4), 360);
+  finishConfetti(p);
   if (!game.best || p.finishTime < game.best) { game.best = p.finishTime; saveBest(p.finishTime); game.newRecord = true; } else game.newRecord = false;
   game.resultTimer = 2.5;
 }
@@ -811,6 +1106,7 @@ function update(dt) {
       updateKart(k, inp, dt);
     }
     collideKarts();
+    updateItems(dt);
     Net.tick(dt);
     if (game.resultTimer > 0) {
       game.resultTimer -= dt;
@@ -823,6 +1119,9 @@ function update(dt) {
     const p = game.particles[i];
     p.life -= dt; if (p.life <= 0) { game.particles.splice(i, 1); continue; }
     p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; const dmp = Math.pow(0.03, dt); p.vx *= dmp; p.vy *= dmp;
+    if (p.kind === 'water' || p.kind === 'spark1' || p.kind === 'spark2' || p.kind === 'boom') p.vz -= 500 * dt;
+    else if (p.kind === 'confetti') { p.vz = Math.max(p.vz - 120 * dt, -45); p.vx += Math.sin(p.life * 9) * 30 * dt; }
+    if (p.z < 0) p.z = 0;
   }
   for (let i = game.messages.length - 1; i >= 0; i--) { game.messages[i].t -= dt; if (game.messages[i].t <= 0) game.messages.splice(i, 1); }
   if (game.goFlash) game.goFlash = Math.max(0, game.goFlash - dt);
@@ -1218,6 +1517,7 @@ const Gfx = (() => {
 
     // 자연물 (나무 / 바위)
     buildProps(G, tr, th);
+    buildRamps(G, tr);
 
     // 원경 산
     {
@@ -1319,7 +1619,7 @@ const Gfx = (() => {
   }
   function makeKartMesh(k) {
     const S = kartShared, model = k.kart || 'racer', ch = k.char || 'helmet';
-    const root = new THREE.Group(), body = new THREE.Group(); root.add(body);
+    const root = new THREE.Group(), tilt = new THREE.Group(), body = new THREE.Group(); root.add(tilt); tilt.add(body);
     const paint = new THREE.MeshPhysicalMaterial({ color: k.color, metalness: 0.25, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.12 });
     const suit = std({ color: new THREE.Color(k.color).multiplyScalar(0.55), roughness: 0.75 });
     const add = (geo, mat, x, y, z, parent = body) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m; };
@@ -1527,7 +1827,7 @@ const Gfx = (() => {
     const wheels = [], steer = [];
     const rimGlow = std({ color: 0x111111, emissive: k.color, emissiveIntensity: 1.3 });
     const mkWheel = (r, w, x, z, front) => {
-      const holder = new THREE.Group(); holder.position.set(x, r, z); root.add(holder);
+      const holder = new THREE.Group(); holder.position.set(x, r, z); tilt.add(holder);
       const spin = new THREE.Group(); holder.add(spin);
       const t = new THREE.Mesh(S.tireG, S.rubber); t.scale.set(r, r, w); t.castShadow = true; spin.add(t);
       const rim = new THREE.Mesh(S.rimG, S.chrome); rim.scale.set(r, r, w); spin.add(rim);
@@ -1537,7 +1837,9 @@ const Gfx = (() => {
     mkWheel(rr, rw, rx, rz, false); mkWheel(rr, rw, rx, -rz, false);
     mkWheel(fr, fw, fx, fz, true); mkWheel(fr, fw, fx, -fz, true);
     root.traverse(o => { if (o.isMesh) o.castShadow = true; });
-    return { root, body, wheels, steer, k, anim };
+    const shieldM = new THREE.Mesh(new THREE.SphereGeometry(28, 24, 16), M.shield); shieldM.position.y = 16; shieldM.visible = false; root.add(shieldM);
+    const bubbleM = new THREE.Mesh(new THREE.SphereGeometry(27, 24, 16), M.bubble); bubbleM.position.y = 15; bubbleM.visible = false; root.add(bubbleM);
+    return { root, tilt, body, wheels, steer, k, anim, shieldM, bubbleM };
   }
 
   function setKarts(karts) {
@@ -1572,14 +1874,23 @@ const Gfx = (() => {
     for (const p of game.particles) {
       const t = p.life / p.max;
       let sys, n, c, size, a;
-      if (p.kind === 'fire' || p.kind === 'blue') {
+      const k2 = p.kind;
+      if (k2 === 'fire' || k2 === 'blue' || k2 === 'spark1' || k2 === 'spark2' || k2 === 'boom' || k2 === 'wind') {
         if (ng >= MAXP) continue; sys = glowSys; n = ng++;
-        c = p.kind === 'fire' ? [1, 0.45 + 0.4 * t, 0.12 * t] : [0.25, 0.7 + 0.2 * t, 1];
-        size = 1.5 + 4 * t; a = 0.75 * t;
+        if (k2 === 'fire') { c = [1, 0.45 + 0.4 * t, 0.12 * t]; size = 1.5 + 4 * t; a = 0.75 * t; }
+        else if (k2 === 'blue') { c = [0.25, 0.7 + 0.2 * t, 1]; size = 1.5 + 4 * t; a = 0.75 * t; }
+        else if (k2 === 'spark1') { c = [0.4, 0.8, 1]; size = 1.6; a = t; }
+        else if (k2 === 'spark2') { c = [1, 0.62, 0.18]; size = 2; a = t; }
+        else if (k2 === 'boom') { c = [1, 0.75 * t + 0.2, 0.2 * t]; size = 6 + 10 * (1 - t); a = t; }
+        else { c = [0.8, 0.95, 1]; size = 1.2; a = 0.5 * t; }
       } else {
         if (ns >= MAXP) continue; sys = smokeSys; n = ns++;
-        c = p.kind === 'dirt' ? curTrack.def.theme.dust : [0.88, 0.88, 0.9];
-        size = (p.kind === 'dirt' ? 8 : 10) + (1 - t) * 22; a = (p.kind === 'dirt' ? 0.55 : 0.45) * t;
+        if (k2 === 'confetti') { c = p.c; size = 3.2; a = Math.min(1, t * 3); }
+        else if (k2 === 'water') { c = [0.55, 0.82, 1]; size = 5 + (1 - t) * 6; a = 0.7 * t; }
+        else {
+          c = k2 === 'dirt' ? curTrack.def.theme.dust : [0.88, 0.88, 0.9];
+          size = (k2 === 'dirt' ? 8 : 10) + (1 - t) * 22; a = (k2 === 'dirt' ? 0.55 : 0.45) * t;
+        }
       }
       sys.pos[n * 3] = p.x; sys.pos[n * 3 + 1] = p.z; sys.pos[n * 3 + 2] = p.y;
       sys.size[n] = size; sys.alpha[n] = a;
@@ -1609,6 +1920,96 @@ const Gfx = (() => {
   }
   function clearSkids() { skI = 0; skN = 0; skGeo.setDrawRange(0, 0); }
 
+  // ---------- 아이템 / 장애물 ----------
+  const itemGroup = new THREE.Group(); scene.add(itemGroup);
+  let boxMeshes = [], boxesRef = null;
+  const hazMeshes = new Map();
+  const boxTex = canvasTex(128, 128, (g, w, h) => {
+    const gr = g.createLinearGradient(0, 0, w, h);
+    gr.addColorStop(0, '#ff5d73'); gr.addColorStop(0.35, '#ffd23f'); gr.addColorStop(0.65, '#2ec4b6'); gr.addColorStop(1, '#7b61ff');
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 10; g.strokeRect(5, 5, w - 10, h - 10);
+    g.fillStyle = '#ffffff'; g.font = '900 86px Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.shadowColor = 'rgba(0,0,0,0.35)'; g.shadowBlur = 6; g.fillText('?', w / 2, h / 2 + 4);
+  }, { repeat: false });
+  const boxMat = new THREE.MeshPhysicalMaterial({ map: boxTex, emissiveMap: boxTex, emissive: 0xffffff, emissiveIntensity: 0.35, transparent: true, opacity: 0.88, roughness: 0.15, clearcoat: 1 });
+  const boxGeo = new THREE.BoxGeometry(17, 17, 17);
+  const M = {
+    banana: new THREE.MeshPhysicalMaterial({ color: 0xffd93b, roughness: 0.35, clearcoat: 0.6 }),
+    bananaTip: std({ color: 0x5a3b1c, roughness: 0.6 }),
+    water: new THREE.MeshPhysicalMaterial({ color: 0x5ec8ff, roughness: 0.05, clearcoat: 1, transparent: true, opacity: 0.6, depthWrite: false }),
+    missile: new THREE.MeshPhysicalMaterial({ color: 0xf2f4f7, roughness: 0.3, clearcoat: 1 }),
+    missileRed: new THREE.MeshPhysicalMaterial({ color: 0xe63946, roughness: 0.3, clearcoat: 1 }),
+    shield: new THREE.MeshBasicMaterial({ color: 0x66e0ff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }),
+    bubble: new THREE.MeshPhysicalMaterial({ color: 0xbfeaff, roughness: 0.02, clearcoat: 1, transparent: true, opacity: 0.38, depthWrite: false }),
+  };
+  function hazMesh(kind) {
+    const g = new THREE.Group();
+    if (kind === 'banana') {
+      const b = new THREE.Mesh(new THREE.TorusGeometry(6, 2.3, 10, 20, PI * 0.9), M.banana); b.rotation.z = 0.2; b.position.y = 3; b.castShadow = true; g.add(b);
+      const t = new THREE.Mesh(new THREE.SphereGeometry(1.4, 8, 6), M.bananaTip); t.position.set(6, 4.5, 0); g.add(t);
+      const peel = new THREE.Mesh(new THREE.TorusGeometry(4, 1.6, 8, 12, PI * 0.7), M.banana); peel.rotation.set(PI / 2, 0, 1); peel.position.y = 1; g.add(peel);
+    } else if (kind === 'bomb') {
+      const s = new THREE.Mesh(new THREE.SphereGeometry(8, 24, 16), M.water); g.add(s); g.userData.ball = s;
+      const hl = new THREE.Mesh(new THREE.SphereGeometry(2, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff })); hl.position.set(-3, 4, 3); s.add(hl);
+    } else if (kind === 'missile') {
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 16, 14), M.missile); body.rotation.z = PI / 2; body.castShadow = true; g.add(body);
+      const nose = new THREE.Mesh(new THREE.ConeGeometry(2.6, 6, 14), M.missileRed); nose.rotation.z = -PI / 2; nose.position.x = 11; g.add(nose);
+      for (let i = 0; i < 4; i++) { const f = new THREE.Mesh(new THREE.BoxGeometry(4, 0.6, 5), M.missileRed); f.position.x = -6.5; f.rotation.x = i * PI / 2; f.translateZ(3); g.add(f); }
+    }
+    itemGroup.add(g);
+    return g;
+  }
+  function syncItems(dt) {
+    const t = performance.now() / 1000;
+    const boxes = game.boxes || [];
+    if (boxesRef !== boxes) {
+      for (const m of boxMeshes) itemGroup.remove(m);
+      boxMeshes = boxes.map(() => { const m = new THREE.Mesh(boxGeo, boxMat); m.castShadow = true; itemGroup.add(m); return m; });
+      boxesRef = boxes;
+    }
+    boxes.forEach((b, i) => {
+      const m = boxMeshes[i];
+      m.visible = b.t <= 0;
+      const pop = b.t > 2.2 ? (b.t - 2.2) / 0.3 : 0;
+      m.position.set(b.x, ROAD_Y + 14 + Math.sin(t * 3 + i) * 2.5, b.y);
+      m.rotation.set(t * 0.9 + i, t * 1.3 + i, 0);
+      m.scale.setScalar(1 + pop);
+    });
+    const seen = new Set();
+    for (const h of game.hazards || []) {
+      seen.add(h.id);
+      let m = hazMeshes.get(h.id);
+      if (!m) { m = hazMesh(h.kind); hazMeshes.set(h.id, m); }
+      m.position.set(h.x, ROAD_Y + (h.z || 0), h.y);
+      if (h.kind === 'banana') m.rotation.y = h.t * 0.5;
+      else if (h.kind === 'missile') { m.rotation.y = -Math.atan2(h.vy, h.vx); m.rotation.x = t * 12; }
+      else if (h.kind === 'bomb') {
+        const ball = m.userData.ball;
+        if (h.landed) { const s = 1 + Math.sin(t * 6) * 0.04, grow = Math.min(1, (h.t - 0.65) / 0.2); ball.scale.set(6.5 * grow * s, 2.4 * grow * s, 6.5 * grow * s); ball.position.y = 2; }
+        else { ball.scale.setScalar(1); ball.rotation.x = t * 8; }
+      }
+    }
+    for (const [id, m] of hazMeshes) if (!seen.has(id)) { itemGroup.remove(m); hazMeshes.delete(id); }
+  }
+  // 점프대 (setTrack 에서 호출)
+  function buildRamps(G, tr) {
+    const tex = canvasTex(128, 64, (g, w, h) => {
+      g.fillStyle = '#ffd23f'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#1b1b1b';
+      for (let x = -64; x < w; x += 32) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + 16, h); g.lineTo(x + 48, 0); g.lineTo(x + 32, 0); g.closePath(); g.fill(); }
+    });
+    tex.repeat.set(1 / 40, 1 / 40);
+    const shape = new THREE.Shape(); shape.moveTo(-50, 0); shape.lineTo(0, 10); shape.lineTo(0, 0); shape.lineTo(-50, 0);
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: 124, bevelEnabled: false }); geo.translate(0, 0, -62);
+    for (const rp of tr.ramps) {
+      const g = new THREE.Group(), i = rp.idx;
+      g.position.set(tr.pts[i][0], ROAD_Y, tr.pts[i][1]); g.rotation.y = -tr.ang[i];
+      g.add(shadowed(new THREE.Mesh(geo, std({ map: tex, roughness: 0.6 }))));
+      G.add(g);
+    }
+  }
+
   // ---------- 매 프레임 ----------
   const tmpV = new THREE.Vector3();
   let orbit = 0;
@@ -1619,7 +2020,13 @@ const Gfx = (() => {
     for (const v of kartViews) {
       const k = v.k;
       v.root.visible = !(k.ghost > 0 && Math.floor(performance.now() / 90) % 2);
-      v.root.position.set(k.x, ROAD_Y - 0.2, k.y);
+      const tt = performance.now() / 1000;
+      v.root.position.set(k.x, ROAD_Y - 0.2 + (k.z || 0) + (k.bubble > 0 ? 8 + Math.sin(tt * 4) * 2 : 0), k.y);
+      v.tilt.rotation.x = k.flip > 0 ? (1 - k.flip / 1.3) * TAU * 2 : 0;
+      v.tilt.position.y = k.flip > 0 ? 8 : 0;
+      v.shieldM.visible = k.shield > 0 && !(k.shield < 1.2 && Math.floor(tt * 10) % 2);
+      v.shieldM.scale.setScalar(1 + Math.sin(tt * 8) * 0.04);
+      v.bubbleM.visible = k.bubble > 0;
       v.root.rotation.y = -k.h;
       for (const w of v.wheels) w.spin.rotation.z -= (k.fwd / w.r) * dt;
       for (const s of v.steer) s.rotation.y = -(k.steerVis || 0) * 0.45;
@@ -1662,6 +2069,7 @@ const Gfx = (() => {
       L.m.material.emissiveIntensity = on ? 2.4 : 0;
     }
     drawParticles();
+    syncItems(dt);
 
     // 카메라
     const cam = game.cam, p = game.player;
@@ -1834,6 +2242,37 @@ function drawHUD() {
     ctx.fillStyle = m.color; ctx.fillText(m.text, VW / 2, VH * 0.28 + i * 44);
     ctx.globalAlpha = 1;
   });
+  // 부스터 / 슬립스트림 스피드 라인
+  if ((p.boost > 0 || p.draftT > 0.4) && game.state === 'race') {
+    const cx = VW / 2, cy = VH * 0.55, diag = Math.hypot(VW, VH);
+    ctx.strokeStyle = p.boost > 0 ? 'rgba(255,255,255,0.28)' : 'rgba(190,240,255,0.22)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < 46; i++) {
+      const a = Math.random() * TAU, r1 = diag * (0.3 + Math.random() * 0.15), r2 = r1 + diag * (0.08 + Math.random() * 0.12);
+      ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    }
+    ctx.stroke();
+  }
+  // 아이템 슬롯
+  if (settings.mode === 'item') {
+    const sz = small ? 44 : 58, x0 = VW / 2 + (small ? 62 : 84), y0 = 10;
+    for (let i = 0; i < 2; i++) {
+      const sq = i === 0 ? sz : Math.round(sz * 0.7), x = i === 0 ? x0 : x0 + sz + 8, y = y0 + (sz - sq);
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'; roundRect(x, y, sq, sq, 10); ctx.fill();
+      ctx.strokeStyle = i === 0 ? '#ffd23f' : 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2; ctx.stroke();
+      let icon = p.items[i] ? ITEM_DEFS[p.items[i]].icon : '';
+      if (!icon && p.rolling > 0 && i === p.items.length) icon = ITEM_DEFS[ITEM_KEYS[Math.floor(performance.now() / 70) % ITEM_KEYS.length]].icon;
+      if (icon) { ctx.font = `${Math.round(sq * 0.62)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(icon, x + sq / 2, y + sq / 2 + 2); ctx.textBaseline = 'alphabetic'; }
+    }
+    if (touchEl.classList.contains('hidden') && p.items.length) { ctx.font = 'bold 11px sans-serif'; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText('Space', x0 + sz / 2, y0 + sz + 14); }
+  }
+  // 미사일 경고
+  if ((game.hazards || []).some(h => h.kind === 'missile' && h.target === p.pid) && Math.floor(performance.now() / 160) % 2) {
+    const gr = ctx.createRadialGradient(VW / 2, VH / 2, Math.min(VW, VH) * 0.35, VW / 2, VH / 2, Math.hypot(VW, VH) * 0.6);
+    gr.addColorStop(0, 'rgba(255,0,0,0)'); gr.addColorStop(1, 'rgba(255,40,40,0.45)');
+    ctx.fillStyle = gr; ctx.fillRect(0, 0, VW, VH);
+    ctx.font = `bold ${small ? 22 : 30}px sans-serif`; ctx.fillStyle = '#ff3b3b'; ctx.textAlign = 'center'; ctx.fillText('⚠ 미사일 접근!', VW / 2, VH * 0.2 + 40);
+  }
   if (p.offTime > 1.2 && !p.finished && game.state === 'race') {
     const t = !touchEl.classList.contains('hidden') ? '복귀 버튼으로 트랙에 돌아갈 수 있어요' : 'T 키를 누르면 트랙으로 돌아가요';
     ctx.font = `bold ${VW < 600 ? 16 : 22}px sans-serif`;
@@ -1891,6 +2330,7 @@ function buildMenu() {
     });
   };
   mkId('charSel', CHARS, 'char', (b, c) => { b.textContent = c.name; });
+  mkId('modeSel', MODES, 'mode', (b, m) => { b.textContent = m.name; });
   mkId('kartSel', KARTS, 'kart', (b, k) => { b.innerHTML = `${k.name}<small>${k.desc}</small>`; });
   const ks = kartStats(settings.kart);
   const bar = (label, v) => `<span>${label}</span><div class="bar"><i style="width:${Math.round(clamp(v, 0.08, 1) * 100)}%"></i></div>`;
@@ -2058,6 +2498,9 @@ const Net = {
       this.pushLobby();
     } else if (m.t === 'st' && Array.isArray(m.s)) {
       this.states[id] = m.s; applyRemote(id, m.s);
+    } else if (m.t === 'ev' && m.e && typeof m.e === 'object') {
+      m.e.from = id; applyEvent(m.e);
+      this.link.broadcast({ t: 'ev', e: m.e });
     }
   },
   drop(id) {
@@ -2071,7 +2514,7 @@ const Net = {
   pushLobby() {
     if (this.role !== 'host') return;
     this.players[0] = { id: 'host', ...this.me() };
-    this.link.broadcast({ t: 'lobby', players: this.players, track: settings.track, diff: settings.diff, bots: settings.bots });
+    this.link.broadcast({ t: 'lobby', players: this.players, track: settings.track, diff: settings.diff, bots: settings.bots, mode: settings.mode });
     renderLobby();
   },
   hostStart() {
@@ -2080,7 +2523,7 @@ const Net = {
     const humans = this.players.map(p => ({ pid: p.id, name: p.name, char: p.char, kart: p.kart, color: p.color, bot: false }));
     const nBots = settings.bots ? Math.max(0, MAX_PLAYERS - humans.length) : 0;
     const roster = [...makeBots(nBots, humans.map(h => h.color)), ...humans];
-    const msg = { t: 'start', track: settings.track, diff: settings.diff, roster };
+    const msg = { t: 'start', track: settings.track, diff: settings.diff, mode: settings.mode, roster };
     this.link.broadcast(msg);
     beginNetRace(msg);
   },
@@ -2094,7 +2537,7 @@ const Net = {
     if (!m || typeof m !== 'object') return;
     if (m.t === 'lobby') {
       this.players = (m.players || []).slice(0, MAX_PLAYERS).map(p => ({ id: String(p.id), ...sanitizePlayer(p) }));
-      this.info = { track: clamp(m.track | 0, 0, TRACKS.length - 1), diff: clamp(m.diff | 0, 0, DIFFS.length - 1), bots: !!m.bots };
+      this.info = { track: clamp(m.track | 0, 0, TRACKS.length - 1), diff: clamp(m.diff | 0, 0, DIFFS.length - 1), bots: !!m.bots, mode: m.mode === 'speed' ? 'speed' : 'item' };
       if (game.state === 'menu' && settings.track !== this.info.track) { settings.track = this.info.track; setupRace(); }
       renderLobby();
     } else if (m.t === 'start') {
@@ -2103,11 +2546,18 @@ const Net = {
       for (const [pid, s] of m.list) if (pid !== this.myId && Array.isArray(s)) applyRemote(pid, s);
     } else if (m.t === 'lobbyback') {
       if (game.state !== 'menu') { showMenu(); showLobby(); }
+    } else if (m.t === 'ev' && m.e && typeof m.e === 'object') {
+      if (m.e.from !== this.myId) applyEvent(m.e);
     } else if (m.t === 'deny') {
       this.fail(m.why);
     }
   },
 
+  sendEvent(e) {
+    if (!this.role || !this.link) return;
+    e.from = this.myId;
+    if (this.role === 'host') this.link.broadcast({ t: 'ev', e }); else this.link.send({ t: 'ev', e });
+  },
   // 매 프레임: 상태 전송 (초당 15회)
   tick(dt) {
     if (!this.role || game.state === 'menu') return;
@@ -2135,11 +2585,12 @@ function sanitizePlayer(p) {
   return { name, char, kart, color };
 }
 
-const BOOST_KINDS = ['', 'mini', 'pad', 'nitro'];
+const BOOST_KINDS = ['', 'mini', 'pad', 'nitro', 'mini2'];
 const r1 = v => Math.round(v * 10) / 10;
 function packKart(k) {
   return [r1(k.x), r1(k.y), Math.round(k.h * 1000) / 1000, r1(k.vx), r1(k.vy), r1(k.fwd), r1(k.lat || 0), Math.round(k.steerVis * 100) / 100,
-    (k.drift ? 1 : 0) | (k.boost > 0 ? 2 : 0), BOOST_KINDS.indexOf(k.boostKind), k.lap, k.idx, k.finished ? Math.round(k.finishTime * 1000) / 1000 : 0];
+    (k.drift ? 1 : 0) | (k.boost > 0 ? 2 : 0), BOOST_KINDS.indexOf(k.boostKind), k.lap, k.idx, k.finished ? Math.round(k.finishTime * 1000) / 1000 : 0,
+    (k.spin > 0 ? 1 : 0) | (k.bubble > 0 ? 2 : 0) | (k.flip > 0 ? 4 : 0) | (k.shield > 0 ? 8 : 0), r1(k.z || 0)];
 }
 function applyRemote(pid, s) {
   const k = game.karts.find(q => q.pid === pid && q.remote);
@@ -2148,6 +2599,12 @@ function applyRemote(pid, s) {
   k.fwd = +s[5]; k.lat = +s[6]; k.steerVis = +s[7];
   k.drift = !!(s[8] & 1); k.boost = (s[8] & 2) ? 0.2 : 0; k.boostKind = BOOST_KINDS[s[9]] || '';
   k.lap = s[10] | 0; k.idx = clamp(s[11] | 0, 0, game.track.N - 1);
+  if (s.length >= 15) {
+    const st = s[13] | 0;
+    k.spin = st & 1 ? 0.3 : 0; k.bubble = st & 2 ? 0.3 : 0;
+    if (st & 4) { if (!(k.flip > 0)) k.flip = 1.3; } else k.flip = 0;
+    k.shield = st & 8 ? 2 : 0; k.z = Math.max(0, +s[14] || 0);
+  }
   if (s[12] > 0 && !k.finished) {
     k.finished = true; k.finishTime = +s[12];
     game.finishOrder.push(k); game.finishOrder.sort((a, b) => a.finishTime - b.finishTime);
@@ -2165,6 +2622,18 @@ function updateRemote(k, dt) {
   k.boost = Math.max(0, k.boost - dt);
   kartFx(k);
 }
+function applyEvent(e) {
+  if (game.state === 'menu') return;
+  if (e.k === 'hz' && e.h && typeof e.h.id === 'string' && ITEM_DEFS[e.h.kind]) {
+    const h = e.h;
+    addHazard({ id: h.id, kind: h.kind, owner: String(h.owner || ''), target: String(h.target || ''), t: 0, x: +h.x || 0, y: +h.y || 0, vx: +h.vx || 0, vy: +h.vy || 0 }, false);
+    if (h.kind === 'missile' && h.target === Net.myId) { Sound.whoosh(0.6, 0.4, 300); message('⚠ 미사일이 날아와요!', '#ff5d73', 1.2); }
+  } else if (e.k === 'rm' && typeof e.id === 'string') {
+    const h = game.hazards.find(q => q.id === e.id);
+    if (h && h.kind === 'missile') explosion(h.x, h.y);
+    removeHazard(e.id, false);
+  }
+}
 function removeKart(pid) {
   const i = game.karts.findIndex(k => k.pid === pid && k.remote);
   if (i < 0) return;
@@ -2178,6 +2647,7 @@ function beginNetRace(m) {
   if (!roster.some(e => e.pid === Net.myId)) return;
   settings.track = clamp(m.track | 0, 0, TRACKS.length - 1);
   settings.diff = clamp(m.diff | 0, 0, DIFFS.length - 1);
+  settings.mode = m.mode === 'speed' ? 'speed' : 'item';
   document.getElementById('lobby').classList.add('hidden');
   startRace(roster);
 }
@@ -2231,10 +2701,11 @@ function renderLobby() {
     html += `<ul class="players">${playerRows()}</ul>`;
     if (host) {
       html += `<h2>트랙</h2><div class="row" id="lobbyTrack">${TRACKS.map((t, i) => `<button class="opt${i === settings.track ? ' sel' : ''}" data-i="${i}">${esc(t.name)}</button>`).join('')}</div>
+        <h2>모드</h2><div class="row" id="lobbyMode">${MODES.map(m => `<button class="opt${m.id === settings.mode ? ' sel' : ''}" data-m="${m.id}">${esc(m.name)}</button>`).join('')}</div>
         <label class="chk"><input type="checkbox" id="botChk" ${settings.bots ? 'checked' : ''}> 빈자리는 컴퓨터 레이서로 채우기 (${esc(DIFFS[settings.diff].name)})</label>
         <div class="row"><button class="go" id="netStartBtn">레이스 시작</button></div>`;
     } else {
-      html += `<p class="lead">트랙: <b>${esc(TRACKS[info.track].name)}</b> · ${info.bots ? '컴퓨터 레이서 있음' : '사람만'}<br>방장이 시작하기를 기다리는 중…</p>`;
+      html += `<p class="lead">트랙: <b>${esc(TRACKS[info.track].name)}</b> · ${info.mode === 'speed' ? '스피드전' : '아이템전'} · ${info.bots ? '컴퓨터 레이서 있음' : '사람만'}<br>방장이 시작하기를 기다리는 중…</p>`;
     }
     html += `<button class="link" id="leaveBtn">방 나가기</button>`;
     el.innerHTML = html;
@@ -2246,6 +2717,7 @@ function renderLobby() {
         if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(inp.value).then(done, fallback); else fallback();
       };
       document.querySelectorAll('#lobbyTrack .opt').forEach(b => b.onclick = () => { settings.track = +b.dataset.i; saveSettings(); setupRace(); Net.pushLobby(); });
+      document.querySelectorAll('#lobbyMode .opt').forEach(b => b.onclick = () => { settings.mode = b.dataset.m; saveSettings(); Net.pushLobby(); });
       document.getElementById('botChk').onchange = e => { settings.bots = e.target.checked; saveSettings(); Net.pushLobby(); };
       document.getElementById('netStartBtn').onclick = () => Net.hostStart();
     }
