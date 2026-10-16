@@ -377,11 +377,11 @@ const COLORS = ['#d7263d', '#1b98e0', '#f4d35e', '#2ec4b6', '#9b5de5', '#ff7f11'
 const BOT_NAMES = ['다오', '배찌', '디지니', '모스', '케피'];
 const DIFFS = [{ name: '쉬움', skill: 0.86 }, { name: '보통', skill: 0.95 }, { name: '어려움', skill: 1.02 }];
 const CHARS = [
-  { id: 'helmet', name: '레이서', skin: '#f1c27d' },
-  { id: 'bunny', name: '토끼', skin: '#f6efe9' },
-  { id: 'bear', name: '곰', skin: '#8b5a3c' },
-  { id: 'cat', name: '고양이', skin: '#f2a65a' },
-  { id: 'robot', name: '로봇', skin: '#b8c2cc' },
+  { id: 'helmet', name: '레이서', skin: '#ffd8b5', light: '#ffffff' },
+  { id: 'bunny', name: '토끼', skin: '#fbf6f2', light: '#ffffff' },
+  { id: 'bear', name: '곰', skin: '#b5794a', light: '#f4dcbf' },
+  { id: 'cat', name: '고양이', skin: '#f7a75c', light: '#fff4e6' },
+  { id: 'robot', name: '로봇', skin: '#e9eef3', light: '#ffffff' },
 ];
 // top: 최고속도, accel: 가속, off: 잔디 위 속도 비율, gauge: 드리프트 게이지 충전, steer: 핸들링
 const KARTS = [
@@ -1272,13 +1272,24 @@ const Gfx = (() => {
     skin: std({ color: 0x222222, roughness: 0.6 }),
     cage: std({ color: 0x2a2d33, metalness: 0.7, roughness: 0.35 }),
     lamp: std({ color: 0xfff6d8, emissive: 0xfff0c0, emissiveIntensity: 0.8, roughness: 0.2 }),
-    eye: std({ color: 0x111111, roughness: 0.3 }),
+    eye: new THREE.MeshPhysicalMaterial({ color: 0x15101a, roughness: 0.08, clearcoat: 1 }),
     white: std({ color: 0xffffff, roughness: 0.4 }),
     pink: std({ color: 0xf4a6b8, roughness: 0.6 }),
     cream: std({ color: 0xe8cfae, roughness: 0.7 }),
     robot: std({ color: 0xa9b4c0, metalness: 0.8, roughness: 0.3 }),
     glow: std({ color: 0x0a2a33, emissive: 0x33e0ff, emissiveIntensity: 1.6 }),
     redGlow: std({ color: 0x330000, emissive: 0xff3344, emissiveIntensity: 1.6 }),
+    glove: new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.55, clearcoat: 0.3 }),
+    shine: new THREE.MeshBasicMaterial({ color: 0xffffff }),
+    blush: new THREE.MeshBasicMaterial({ color: 0xff8fa8, transparent: true, opacity: 0.55, depthWrite: false }),
+    mouth: std({ color: 0x5a2b1e, roughness: 0.6 }),
+    tooth: std({ color: 0xffffff, roughness: 0.3 }),
+    goggle: new THREE.MeshPhysicalMaterial({ color: 0x7fd8ff, metalness: 0.5, roughness: 0.05, clearcoat: 1 }),
+    catEye: new THREE.MeshPhysicalMaterial({ color: 0x1f3b1a, roughness: 0.1, clearcoat: 1 }),
+    robotHead: new THREE.MeshPhysicalMaterial({ color: 0xf1f4f8, metalness: 0.2, roughness: 0.25, clearcoat: 1 }),
+    robotBody: new THREE.MeshPhysicalMaterial({ color: 0xdfe5ec, metalness: 0.3, roughness: 0.3, clearcoat: 1 }),
+    screen: new THREE.MeshPhysicalMaterial({ color: 0x0b0f18, roughness: 0.08, clearcoat: 1 }),
+    pinkGlow: std({ color: 0x331018, emissive: 0xff6f9a, emissiveIntensity: 1.3 }),
     tireG: (() => { const g = new THREE.CylinderGeometry(1, 1, 1, 20); g.rotateX(PI / 2); return g; })(),
     rimG: (() => { const g = new THREE.CylinderGeometry(0.62, 0.62, 1.04, 12); g.rotateX(PI / 2); return g; })(),
   };
@@ -1360,47 +1371,135 @@ const Gfx = (() => {
     const col = add(new THREE.CylinderGeometry(0.6, 0.6, 9, 6), S.dark, 7, 9, 0); col.rotation.z = 1.0;
     const wheelM = add(new THREE.TorusGeometry(3.3, 0.6, 6, 16), S.dark, 5, 12, 0); wheelM.rotation.y = PI / 2; wheelM.rotation.x = 0.5;
 
-    // 드라이버 (몸통 + 팔)
-    const torso = add(new THREE.CylinderGeometry(3.6, 4.3, 11, 10), suit, -4.5, 12.5, 0); torso.rotation.z = 0.3;
-    for (const s of [-1, 1]) tube(V(-3, 15, s * 4.2), V(5, 12, s * 3), 1.15, suit);
-    // 머리 (캐릭터별)
-    const HX = -2.6, HY = 20.5;
-    const skinCol = (CHARS.find(c => c.id === ch) || CHARS[0]).skin;
-    const skin = std({ color: skinCol, roughness: 0.7 });
-    const eye = S.eye;
-    const eyes = (x, y, gap, r = 0.75) => { for (const s of [-1, 1]) add(new THREE.SphereGeometry(r, 8, 6), eye, x, y, s * gap); };
-    if (ch === 'helmet') {
-      add(new THREE.SphereGeometry(4.5, 18, 14), paint, HX, HY, 0);
-      add(B(2.6, 2.6, 6.8), S.visor, HX + 3.8, HY + 0.3, 0);
-      add(B(6, 1.2, 9.4), S.white, HX, HY + 0.1, 0);
-    } else if (ch === 'bunny') {
-      add(new THREE.SphereGeometry(4.6, 18, 14), skin, HX, HY, 0);
-      for (const s of [-1, 1]) {
-        const ear = add(new THREE.SphereGeometry(1, 10, 8), skin, HX - 0.8, HY + 7.5, s * 1.9); ear.scale.set(1.5, 5, 1.0); ear.rotation.x = s * 0.18;
-        const inner = add(new THREE.SphereGeometry(1, 8, 6), S.pink, HX - 0.1, HY + 7.5, s * 1.9); inner.scale.set(0.6, 4, 0.6); inner.rotation.x = s * 0.18;
-      }
-      eyes(HX + 4, HY + 0.8, 1.7); add(new THREE.SphereGeometry(0.7, 8, 6), S.pink, HX + 4.5, HY - 0.6, 0);
-      add(B(1.2, 1.4, 9.6), paint, HX, HY + 2.2, 0); // 고글 밴드
-    } else if (ch === 'bear') {
-      add(new THREE.SphereGeometry(4.8, 18, 14), skin, HX, HY, 0);
-      for (const s of [-1, 1]) add(new THREE.SphereGeometry(1.9, 10, 8), skin, HX - 0.6, HY + 4.2, s * 3.4);
-      const muz = add(new THREE.SphereGeometry(2, 12, 8), S.cream, HX + 3.7, HY - 1, 0); muz.scale.set(0.8, 0.8, 1.1);
-      add(new THREE.SphereGeometry(0.75, 8, 6), eye, HX + 5.3, HY - 0.6, 0);
-      eyes(HX + 3.9, HY + 1.3, 1.9, 0.7);
-      add(B(5, 1.6, 10), paint, HX - 0.2, HY + 2.6, 0).scale.set(1, 1, 1); // 두건
-    } else if (ch === 'cat') {
-      add(new THREE.SphereGeometry(4.6, 18, 14), skin, HX, HY, 0);
-      for (const s of [-1, 1]) { const e = add(new THREE.ConeGeometry(1.9, 3.8, 4), skin, HX - 0.6, HY + 5, s * 2.8); e.rotation.x = s * 0.35; }
-      eyes(HX + 4, HY + 0.9, 1.8, 0.85);
-      add(new THREE.SphereGeometry(0.55, 8, 6), S.pink, HX + 4.6, HY - 0.5, 0);
-      for (const s of [-1, 1]) for (const dy of [-0.8, -1.4]) { const w = add(B(0.2, 0.2, 4), eye, HX + 4.3, HY + dy, s * 3.2); w.rotation.x = s * 0.2; }
-    } else if (ch === 'robot') {
-      add(B(8, 7, 8.5), S.robot, HX, HY, 0);
-      add(B(0.6, 2, 6.4), S.glow, HX + 4.05, HY + 0.6, 0);
-      add(new THREE.CylinderGeometry(0.35, 0.35, 4, 6), S.dark, HX, HY + 5.4, 0);
-      add(new THREE.SphereGeometry(1, 10, 8), S.redGlow, HX, HY + 7.8, 0);
-      for (const s of [-1, 1]) add(new THREE.CylinderGeometry(1.4, 1.4, 1, 10), S.dark, HX, HY, s * 4.5).rotation.x = PI / 2;
+    // ---- 드라이버: 2등신 치비 캐릭터 ----
+    const cdef = CHARS.find(c => c.id === ch) || CHARS[0];
+    const toy = (color, o = {}) => new THREE.MeshPhysicalMaterial({ color, roughness: 0.48, clearcoat: 0.35, clearcoatRoughness: 0.4, ...o });
+    const fur = toy(cdef.skin), furLight = toy(cdef.light || '#ffffff'), inner = toy('#ffb3c6');
+    const suitM = toy(new THREE.Color(k.color).lerp(new THREE.Color('#ffffff'), 0.15));
+    const SPH = new THREE.SphereGeometry(1, 32, 24);
+    const ball = (mat, x, y, z, sx, sy = sx, sz = sx, parent = body) => { const m = add(SPH, mat, x, y, z, parent); m.scale.set(sx, sy, sz); return m; };
+    const anim = { ears: [], eyes: [], scarf: null, head: null, seed: Math.random() * 10, robot: ch === 'robot' };
+
+    // 몸통 (레이싱 슈트) + 흰 배
+    ball(suitM, -5, 13.2, 0, 4.4, 5.2, 5);
+    ball(ch === 'robot' ? S.robotBody : furLight, -1.9, 12.6, 0, 1.6, 3.4, 3.4);
+    // 팔 + 장갑 낀 손
+    for (const s of [-1, 1]) {
+      tube(V(-5, 16.2, s * 4.4), V(3.6, 12.6, s * 3.3), 1.35, suitM);
+      ball(S.glove, 4.3, 12.4, s * 3.2, 1.75);
     }
+    // 목도리 + 펄럭이는 꼬리
+    const scarfM = toy(ch === 'robot' ? '#ffd23f' : '#ffffff');
+    const ring = add(new THREE.TorusGeometry(3.4, 1.15, 10, 24), scarfM, -4.6, 18.4, 0); ring.rotation.x = PI / 2;
+    const scarf = new THREE.Group(); scarf.position.set(-7.6, 18.2, 1.5); body.add(scarf);
+    const tail = add(new THREE.BoxGeometry(7, 2.2, 0.7), scarfM, -3.3, 0, 0, scarf); tail.rotation.z = 0.15;
+    anim.scarf = scarf;
+
+    // 머리 (그룹: 위치 기준 = 머리 중심)
+    const R = 6.4;
+    const head = new THREE.Group(); head.position.set(-3.2, 24.4, 0); body.add(head); anim.head = head;
+    // 머리 표면 위의 한 점 (yaw: 좌우, pitch: 위아래, 정면 = +x)
+    const surf = (yaw, pitch, r = R) => new THREE.Vector3(Math.cos(pitch) * Math.cos(yaw), Math.sin(pitch), Math.cos(pitch) * Math.sin(yaw)).multiplyScalar(r);
+    const Z = new THREE.Vector3(0, 0, 1);
+    const face = (mesh, yaw, pitch, r = R) => { const d = surf(yaw, pitch, 1); mesh.position.copy(d.clone().multiplyScalar(r)); mesh.quaternion.setFromUnitVectors(Z, d); head.add(mesh); mesh.castShadow = false; return mesh; };
+    const eyeG = new THREE.SphereGeometry(1, 20, 16);
+    const eyesAt = (yaw, pitch, size, mat = S.eye) => {
+      for (const s of [-1, 1]) {
+        const g = new THREE.Group(); face(g, s * yaw, pitch, R - 0.15);
+        const e = new THREE.Mesh(eyeG, mat); e.scale.set(size * 0.78, size * 1.08, size * 0.5); g.add(e);
+        const h1 = new THREE.Mesh(eyeG, S.shine); h1.scale.setScalar(size * 0.3); h1.position.set(-size * 0.22, size * 0.38, size * 0.42); g.add(h1);
+        const h2 = new THREE.Mesh(eyeG, S.shine); h2.scale.setScalar(size * 0.14); h2.position.set(size * 0.25, -size * 0.35, size * 0.44); g.add(h2);
+        anim.eyes.push(g);
+      }
+    };
+    const blush = (yaw, pitch, size) => { for (const s of [-1, 1]) { const b = face(new THREE.Mesh(new THREE.CircleGeometry(size, 20), S.blush), s * yaw, pitch, R + 0.05); b.scale.set(1.25, 0.8, 1); } };
+    const smile = (yaw, pitch, w, mat = S.mouth, r = R + 0.02) => {
+      const m = face(new THREE.Mesh(new THREE.TorusGeometry(w, 0.2, 6, 16, PI), mat), yaw, pitch, r);
+      m.rotateZ(PI); return m;
+    };
+
+    if (ch === 'helmet') {
+      ball(fur, 0, 0, 0, R, R, R, head);
+      // 헬멧 (얼굴 부분이 열린 반구) + 흰 줄무늬
+      const shell = new THREE.Mesh(new THREE.SphereGeometry(R * 1.12, 32, 24, PI + 0.95, TAU - 1.9, 0, PI * 0.7), toy(k.color, { side: THREE.DoubleSide, clearcoat: 1, clearcoatRoughness: 0.1, roughness: 0.3 }));
+      shell.castShadow = true; head.add(shell);
+      const band = new THREE.Mesh(new THREE.SphereGeometry(R * 1.14, 32, 6, PI + 0.95, TAU - 1.9, 0.95, 0.22), toy('#ffffff', { side: THREE.DoubleSide }));
+      head.add(band);
+      // 이마 위 고글
+      for (const s of [-1, 1]) {
+        const lens = face(new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 1.2, 20), S.goggle), s * 0.36, 0.72, R * 1.13);
+        lens.rotateX(PI / 2);
+      }
+      // 앞머리
+      for (const [yw, sz] of [[-0.3, 1.6], [0, 1.9], [0.3, 1.6]]) face(new THREE.Mesh(SPH, toy('#5a3a22')), yw, 0.5, R * 0.95).scale.set(sz, sz * 0.8, sz * 0.7);
+      eyesAt(0.36, 0.02, 1.25);
+      blush(0.62, -0.3, 1.05);
+      smile(0, -0.38, 0.75);
+    } else if (ch === 'bunny') {
+      ball(fur, 0, 0, 0, R, R * 0.96, R, head);
+      // 길고 끝이 접힌 귀
+      for (const s of [-1, 1]) {
+        const ear = new THREE.Group(); ear.position.copy(surf(s * 0.38, 1.15, R * 0.85)); ear.rotation.set(s * 0.22, 0, 0.12); head.add(ear);
+        const lo = ball(fur, 0, 4.2, 0, 1.75, 4.6, 1.3, ear);
+        const loIn = ball(inner, 0.9, 4.2, 0, 0.55, 3.6, 0.9, ear);
+        const tip = new THREE.Group(); tip.position.set(0, 8.2, 0); tip.rotation.z = -0.9; ear.add(tip);
+        ball(fur, 0, 2.2, 0, 1.6, 2.8, 1.25, tip); ball(inner, 0.85, 2.2, 0, 0.5, 2, 0.85, tip);
+        anim.ears.push({ g: ear, base: ear.rotation.clone(), side: s });
+        void lo; void loIn;
+      }
+      eyesAt(0.38, 0.05, 1.3);
+      blush(0.66, -0.28, 1.15);
+      face(new THREE.Mesh(SPH, inner), 0, -0.2, R - 0.1).scale.set(0.75, 0.55, 0.5);
+      smile(-0.0, -0.4, 0.55);
+      face(new THREE.Mesh(new THREE.BoxGeometry(0.9, 1, 0.3), S.tooth), 0, -0.5, R - 0.05);
+    } else if (ch === 'bear') {
+      ball(fur, 0, 0, 0, R, R * 0.95, R * 1.02, head);
+      for (const s of [-1, 1]) {
+        const ear = new THREE.Group(); ear.position.copy(surf(s * 0.78, 0.92, R * 0.92)); head.add(ear);
+        ball(fur, 0, 0, 0, 1.7, 2.5, 2.5, ear); ball(furLight, 0.95, -0.1, 0, 0.9, 1.5, 1.5, ear);
+        anim.ears.push({ g: ear, base: ear.rotation.clone(), side: s, small: true });
+      }
+      face(new THREE.Mesh(SPH, furLight), 0, -0.3, R - 0.9).scale.set(2.6, 1.9, 1.7);
+      face(new THREE.Mesh(SPH, S.eye), 0, -0.14, R + 0.55).scale.set(1.1, 0.75, 0.6);
+      face(new THREE.Mesh(SPH, S.shine), -0.06, -0.08, R + 1.05).scale.setScalar(0.28);
+      eyesAt(0.42, 0.14, 1.1);
+      blush(0.72, -0.22, 1.1);
+      smile(0, -0.5, 0.55);
+    } else if (ch === 'cat') {
+      ball(fur, 0, 0, 0, R * 1.04, R * 0.94, R * 1.04, head);
+      for (const s of [-1, 1]) {
+        const ear = new THREE.Group(); ear.position.copy(surf(s * 0.62, 0.86, R * 0.86)); ear.rotation.set(s * 0.45, 0, -0.1); head.add(ear);
+        add(new THREE.ConeGeometry(2.7, 4.6, 24), fur, 0, 2, 0, ear);
+        add(new THREE.ConeGeometry(1.6, 3, 20), inner, 0.75, 1.7, 0, ear);
+        anim.ears.push({ g: ear, base: ear.rotation.clone(), side: s, small: true });
+      }
+      // 이마 줄무늬
+      for (const yw of [-0.18, 0, 0.18]) face(new THREE.Mesh(SPH, toy('#c9702c')), yw, 0.62, R * 0.99).scale.set(0.45, 1.5, 0.4);
+      face(new THREE.Mesh(SPH, furLight), 0, -0.36, R - 0.6).scale.set(2.4, 1.5, 1.3);
+      face(new THREE.Mesh(SPH, inner), 0, -0.22, R + 0.1).scale.set(0.6, 0.42, 0.35);
+      for (const s of [-1, 1]) smile(s * 0.07, -0.33, 0.42, S.mouth, R + 0.72);
+      eyesAt(0.4, 0.06, 1.3, S.catEye);
+      blush(0.7, -0.26, 1.0);
+      for (const s of [-1, 1]) for (const dy of [-0.32, -0.42]) {
+        const w = face(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3.6, 4), S.mouth), s * 0.5, dy, R + 0.3);
+        w.rotateZ(PI / 2 + s * (dy + 0.37) * 2);
+      }
+    } else if (ch === 'robot') {
+      ball(S.robotHead, 0, 0, 0, R * 1.05, R * 0.9, R * 1.05, head);
+      // 검은 화면 얼굴 + 웃는 눈 (^ ^)
+      face(new THREE.Mesh(SPH, S.screen), 0, 0, R * 0.98).scale.set(4.4, 3.3, 0.9);
+      for (const s of [-1, 1]) {
+        const e = face(new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.3, 8, 16, PI), S.glow), s * 0.3, 0.12, R * 1.13);
+        anim.eyes.push(e);
+      }
+      face(new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.22, 6, 16, PI), S.glow), 0, -0.22, R * 1.12).rotateZ(PI);
+      for (const s of [-1, 1]) face(new THREE.Mesh(new THREE.CircleGeometry(0.6, 16), S.pinkGlow), s * 0.5, -0.12, R * 1.1);
+      for (const s of [-1, 1]) { const ear = add(new THREE.CylinderGeometry(1.8, 1.8, 1.4, 20), toy(k.color, { metalness: 0.4 }), 0, 0, s * R * 1.05, head); ear.rotation.x = PI / 2; }
+      add(new THREE.CylinderGeometry(0.3, 0.3, 3.6, 8), S.dark, 0, R * 0.9 + 1.6, 0, head);
+      const bulb = add(new THREE.SphereGeometry(1.2, 16, 12), S.redGlow, 0, R * 0.9 + 3.8, 0, head);
+      anim.ears.push({ g: bulb, base: bulb.rotation.clone(), side: 1, antenna: true });
+    }
+    for (const e of anim.eyes) e.userData.sy = e.scale.y;
     body.position.y = lift;
 
     // 바퀴 (차체 기울기와 분리)
@@ -1415,7 +1514,7 @@ const Gfx = (() => {
     mkWheel(rr, rw, rx, rz, false); mkWheel(rr, rw, rx, -rz, false);
     mkWheel(fr, fw, fx, fz, true); mkWheel(fr, fw, fx, -fz, true);
     root.traverse(o => { if (o.isMesh) o.castShadow = true; });
-    return { root, body, wheels, steer, k };
+    return { root, body, wheels, steer, k, anim };
   }
 
   function setKarts(karts) {
@@ -1504,6 +1603,24 @@ const Gfx = (() => {
       const roll = clamp(-(k.lat || 0) * 0.00035 - (k.steerVis || 0) * Math.abs(k.fwd) / MAX_SPEED * 0.05, -0.12, 0.12);
       v.body.rotation.x = lerp(v.body.rotation.x, roll, Math.min(1, dt * 8));
       v.body.rotation.z = lerp(v.body.rotation.z, k.boost > 0 ? 0.035 : 0, Math.min(1, dt * 5));
+      // 캐릭터 애니메이션: 고개 까딱, 귀 흔들림, 목도리 펄럭임, 눈 깜빡임
+      const a = v.anim;
+      if (a) {
+        const t = performance.now() / 1000 + a.seed, sp = Math.min(1, Math.abs(k.fwd) / MAX_SPEED);
+        a.head.position.y = 24.4 + Math.sin(t * 6) * 0.22;
+        a.head.rotation.z = Math.sin(t * 2.3) * 0.05 + sp * 0.06;
+        a.head.rotation.x = lerp(a.head.rotation.x, -(k.steerVis || 0) * 0.16, Math.min(1, dt * 6));
+        for (const e of a.ears) {
+          if (e.antenna) { e.g.scale.setScalar(1 + Math.sin(t * 5) * 0.12); continue; }
+          const amp = e.small ? 0.04 : 0.09;
+          e.g.rotation.z = e.base.z + Math.sin(t * 5 + e.side) * amp + sp * (e.small ? 0.05 : 0.45);
+          e.g.rotation.x = e.base.x + Math.sin(t * 3.7 + e.side * 2) * amp * 0.6;
+        }
+        a.scarf.rotation.y = Math.sin(t * (7 + sp * 16)) * 0.3 * (0.35 + sp);
+        a.scarf.rotation.z = -0.35 + sp * 0.45;
+        const blink = (t % 3.7) < 0.13 ? 0.12 : 1;
+        for (const e of a.eyes) e.scale.y = e.userData.sy * blink;
+      }
     }
     if (padTex) padTex.offset.x -= dt * 1.6;
     // 출발 신호등
@@ -1556,7 +1673,7 @@ const Gfx = (() => {
     if (tmpV.z > 1) return null;
     return { x: (tmpV.x + 1) / 2 * VW, y: (1 - tmpV.y) / 2 * VH, d: camera.position.distanceTo(new THREE.Vector3(x, h, y)) };
   }
-  return { setTrack, setKarts, addSkid, clearSkids, render, resize, project };
+  return { setTrack, setKarts, addSkid, clearSkids, render, resize, project, camera };
 })();
 window.__gfx = Gfx;
 resize();
