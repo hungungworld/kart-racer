@@ -395,12 +395,13 @@ if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
 const COLORS = ['#d7263d', '#1d5fd8', '#f4c430', '#16a89a', '#8a4fe0', '#ff7f11'];
 const BOT_NAMES = ['다오', '배찌', '디지니', '모스', '케피'];
 const DIFFS = [{ name: '쉬움', skill: 0.86 }, { name: '보통', skill: 0.95 }, { name: '어려움', skill: 1.02 }];
+// 세포 캐릭터 — 각자 아이템 능력 하나를 담당한다
 const CHARS = [
-  { id: 'helmet', name: '방울 후드', skin: '#ffd9bd' },
-  { id: 'bunny', name: '토끼 후드', skin: '#ffd9bd', inner: '#ffc2d4' },
-  { id: 'bear', name: '곰 후드', skin: '#ffd9bd', inner: '#f4dcbf' },
-  { id: 'cat', name: '고양이 후드', skin: '#ffd9bd', inner: '#ffc2d4' },
-  { id: 'robot', name: '로봇 후드', skin: '#ffe3cf' },
+  { id: 'passion', name: '열정 세포', color: '#ff7a1f' },
+  { id: 'yum', name: '냠냠 세포', color: '#ff7fb5' },
+  { id: 'sleepy', name: '쿨쿨 세포', color: '#8f7dff' },
+  { id: 'heart', name: '두근 세포', color: '#ff3d62' },
+  { id: 'spark', name: '반짝 세포', color: '#ffc61a' },
 ];
 // top: 최고속도, accel: 가속, off: 잔디 위 속도 비율, gauge: 드리프트 게이지 충전, steer: 핸들링
 const KARTS = [
@@ -409,10 +410,10 @@ const KARTS = [
   { id: 'buggy', name: '버기', desc: '오프로드', top: 0.97, accel: 1.03, off: 0.9, gauge: 0.95, steer: 0.97 },
   { id: 'classic', name: '클래식', desc: '가속·부스터', top: 0.97, accel: 1.12, off: 0.74, gauge: 1.18, steer: 1 },
 ];
-const settings = { track: 0, color: 1, diff: 1, char: 'helmet', kart: 'racer', name: '', bots: true, mode: 'item' };
+const settings = { track: 0, color: 1, diff: 1, char: 'passion', kart: 'racer', name: '', bots: true, mode: 'item' };
 const MODES = [{ id: 'item', name: '아이템전' }, { id: 'speed', name: '스피드전' }];
 try { Object.assign(settings, JSON.parse(localStorage.getItem('kart.settings') || '{}')); } catch (e) {}
-if (!CHARS.some(c => c.id === settings.char)) settings.char = 'helmet';
+if (!CHARS.some(c => c.id === settings.char)) settings.char = 'passion';
 if (!KARTS.some(c => c.id === settings.kart)) settings.kart = 'racer';
 if (!MODES.some(m => m.id === settings.mode)) settings.mode = 'item';
 if (!settings.name) settings.name = '레이서' + Math.floor(10 + Math.random() * 90);
@@ -424,7 +425,7 @@ const game = {
   cam: { h: 0, fov: 60 }, particles: [], messages: [], resultTimer: 0, finishOrder: []
 };
 
-function makeKart(name, color, isPlayer, char = 'helmet', kart = 'racer') {
+function makeKart(name, color, isPlayer, char = 'passion', kart = 'racer') {
   return {
     name, color, isPlayer, char, kart, ks: kartStats(kart), pid: '', remote: false, ghost: 0, offTime: 0,
     x: 0, y: 0, h: 0, vx: 0, vy: 0, fwd: 0,
@@ -507,7 +508,7 @@ function setupRace(roster) {
   });
   game.player = player;
   game.time = 0;
-  game.particles = []; game.messages = []; game.finishOrder = []; game.resultTimer = 0;
+  game.particles = []; game.messages = []; game.finishOrder = []; game.resultTimer = 0; game.pops = [];
   Gfx.clearSkids();
   game.lastCount = 4;
   game.cam.h = player.h; game.cam.fov = 60;
@@ -532,13 +533,18 @@ function showMenu() {
 function message(text, color = '#ffd23f', dur = 1.2) { game.messages.push({ text, color, t: dur, dur }); }
 
 // ===================== 아이템전 =====================
+// 아이템 = 세포가 출동해서 능력을 발휘
 const ITEM_DEFS = {
-  booster: { icon: '🚀', name: '부스터' },
-  banana: { icon: '🍌', name: '바나나' },
-  bomb: { icon: '💧', name: '물폭탄' },
-  missile: { icon: '🎯', name: '미사일' },
-  shield: { icon: '🛡️', name: '실드' },
+  booster: { icon: '🔥', name: '열정 폭발', cell: '열정 세포', char: 'passion' },
+  banana: { icon: '🍩', name: '도넛 함정', cell: '냠냠 세포', char: 'yum' },
+  bomb: { icon: '💤', name: '졸음 구름', cell: '쿨쿨 세포', char: 'sleepy' },
+  missile: { icon: '💘', name: '두근 화살', cell: '두근 세포', char: 'heart' },
+  shield: { icon: '💡', name: '반짝 보호막', cell: '반짝 세포', char: 'spark' },
 };
+function cellPop(k, it) {
+  game.pops = game.pops || [];
+  game.pops.push({ k, t: 0, char: ITEM_DEFS[it].char });
+}
 const ITEM_KEYS = Object.keys(ITEM_DEFS);
 const BOX_ROWS = [0.2, 0.5, 0.78];
 const BOX_OFFS = [-66, -22, 22, 66];
@@ -588,23 +594,30 @@ function useItem(k) {
   const fx = Math.cos(k.h), fy = Math.sin(k.h);
   const id = (k.pid || 'k') + '-' + (++hazardSeq);
   const base = { id, owner: k.pid, t: 0 };
+  cellPop(k, it);
   if (it === 'booster') {
     k.boost = 1.7; k.boostKind = 'nitro';
-    if (k.isPlayer) { Sound.whoosh(1.0, 0.55, 700); message('부스터!', '#ff7f11', 0.8); }
+    for (let i = 0; i < 16; i++) spawn(k.x, k.y, 10, (Math.random() - 0.5) * 160, (Math.random() - 0.5) * 160, 40 + Math.random() * 60, 0.5, 'fire');
+    if (k.isPlayer) { Sound.whoosh(1.0, 0.55, 700); message('🔥 열정 세포 출동! 열정 폭발!', '#ff8a3d', 1); }
   } else if (it === 'shield') {
     k.shield = 6;
-    if (k.isPlayer) { Sound.beep(660, 0.1, 'sine', 0.2); setTimeout(() => Sound.beep(990, 0.18, 'sine', 0.2), 90); message('실드!', '#7fdcff', 0.8); }
+    if (k.isPlayer) { Sound.beep(660, 0.1, 'sine', 0.2); setTimeout(() => Sound.beep(990, 0.18, 'sine', 0.2), 90); message('💡 반짝 세포 출동! 반짝 보호막', '#ffd23f', 1); }
   } else if (it === 'banana') {
     addHazard({ ...base, kind: 'banana', x: k.x - fx * 28, y: k.y - fy * 28, vx: 0, vy: 0 }, true);
-    if (k.isPlayer) Sound.beep(300, 0.12, 'triangle', 0.25);
+    if (k.isPlayer) { Sound.beep(300, 0.12, 'triangle', 0.25); message('🍩 냠냠 세포가 도넛을 놓고 갔어요', '#ff9fc6', 1); }
   } else if (it === 'bomb') {
-    const sp = Math.max(0, k.fwd) + 420;
-    addHazard({ ...base, kind: 'bomb', x: k.x + fx * 24, y: k.y + fy * 24, vx: fx * sp, vy: fy * sp }, true);
-    if (k.isPlayer) Sound.whoosh(0.5, 0.3, 500);
+    // 앞차가 가까우면 그 차가 0.65초 뒤 있을 곳으로, 아니면 트랙을 따라 앞쪽으로 던진다
+    const tr = game.track, tg = kartAhead(k);
+    let lx, ly;
+    if (tg && Math.hypot(tg.x - k.x, tg.y - k.y) < 520) { lx = tg.x + tg.vx * 0.65; ly = tg.y + tg.vy * 0.65; }
+    else { const j = (k.idx + 14) % tr.N, off = clamp(k.lastOff || 0, -ROAD / 2 + 30, ROAD / 2 - 30); lx = tr.pts[j][0] + tr.nx[j] * off; ly = tr.pts[j][1] + tr.ny[j] * off; }
+    const sx = k.x + fx * 24, sy = k.y + fy * 24;
+    addHazard({ ...base, kind: 'bomb', x: sx, y: sy, vx: (lx - sx) / 0.65, vy: (ly - sy) / 0.65 }, true);
+    if (k.isPlayer) { Sound.whoosh(0.5, 0.3, 500); message('💤 쿨쿨 세포 출동! 졸음 구름 발사', '#a99bff', 1); }
   } else if (it === 'missile') {
     const target = kartAhead(k);
     addHazard({ ...base, kind: 'missile', x: k.x + fx * 26, y: k.y + fy * 26, vx: fx * 950, vy: fy * 950, target: target ? target.pid : '' }, true);
-    if (k.isPlayer) { Sound.whoosh(0.8, 0.5, 300); message(target ? `${target.name}에게 미사일!` : '미사일 발사!', '#ff5d73', 1); }
+    if (k.isPlayer) { Sound.whoosh(0.8, 0.5, 300); message(target ? `💘 두근 세포 출동! ${target.name}에게 두근 화살` : '💘 두근 화살 발사!', '#ff5d73', 1.1); }
   }
 }
 
@@ -612,26 +625,35 @@ function hitKart(k, kind) {
   if (k.ghost > 0 || k.remote) return false;
   if (k.shield > 0) {
     k.shield = 0;
-    for (let i = 0; i < 24; i++) { const a = Math.random() * TAU; spawn(k.x + Math.cos(a) * 20, k.y + Math.sin(a) * 20, 12, Math.cos(a) * 120, Math.sin(a) * 120, 30, 0.5, 'blue'); }
-    if (k.isPlayer) { Sound.beep(520, 0.2, 'sine', 0.25); message('실드로 막았다!', '#7fdcff', 1); }
+    for (let i = 0; i < 24; i++) { const a = Math.random() * TAU; spawn(k.x + Math.cos(a) * 20, k.y + Math.sin(a) * 20, 12, Math.cos(a) * 120, Math.sin(a) * 120, 30, 0.5, 'spark2'); }
+    if (k.isPlayer) { Sound.beep(520, 0.2, 'sine', 0.25); message('💡 반짝 보호막이 막아줬어요!', '#ffd23f', 1); }
     return true;
   }
   k.drift = false; k.boost = 0; k.mood = 'angry'; k.moodT = 1.6;
   if (kind === 'banana') {
     k.spin = 1.0;
-    if (k.isPlayer) { Sound.beep(500, 0.5, 'sawtooth', 0.15); message('미끄덩!', '#ffd23f', 1); }
+    for (let i = 0; i < 18; i++) spawn(k.x, k.y, 6, (Math.random() - 0.5) * 140, (Math.random() - 0.5) * 140, 40 + Math.random() * 40, 0.8, 'confetti');
+    if (k.isPlayer) { Sound.beep(500, 0.5, 'sawtooth', 0.15); message('🍩 도넛 밟고 미끄덩! 냠냠…', '#ff9fc6', 1.1); }
   } else if (kind === 'bomb') {
-    k.bubble = 1.5;
-    for (let i = 0; i < 20; i++) spawn(k.x, k.y, 10, (Math.random() - 0.5) * 120, (Math.random() - 0.5) * 120, 40 + Math.random() * 40, 0.8, 'water');
-    if (k.isPlayer) { Sound.beep(880, 0.08, 'sine', 0.2); setTimeout(() => Sound.beep(1200, 0.12, 'sine', 0.2), 80); message('물방울에 갇혔어요!', '#8fd6ff', 1.2); }
+    k.bubble = 1.6;
+    for (let i = 0; i < 16; i++) spawn(k.x, k.y, 14, (Math.random() - 0.5) * 100, (Math.random() - 0.5) * 100, 20 + Math.random() * 30, 1.0, 'zz');
+    if (k.isPlayer) { Sound.beep(440, 0.25, 'sine', 0.2); setTimeout(() => Sound.beep(330, 0.35, 'sine', 0.2), 200); message('💤 졸음 구름에 빠져 쿨쿨…', '#a99bff', 1.3); }
   } else if (kind === 'missile') {
-    k.flip = 1.3; k.vz = 360; k.z = Math.max(k.z || 0, 1);
-    explosion(k.x, k.y);
-    if (k.isPlayer) { message('으악! 미사일에 맞았어요', '#ff5d73', 1.3); game.shake = 14; }
+    k.flip = 1.3; k.vz = 360; k.z = Math.max(k.z || 0, 1); k.mood = 'love';
+    heartBurst(k.x, k.y);
+    if (k.isPlayer) { message('💘 두근! 심쿵해서 빙글빙글', '#ff5d73', 1.3); game.shake = 12; }
   }
   return true;
 }
 
+function heartBurst(x, y) {
+  for (let i = 0; i < 36; i++) {
+    const a = Math.random() * TAU, s = 60 + Math.random() * 200;
+    spawn(x, y, 10 + Math.random() * 10, Math.cos(a) * s, Math.sin(a) * s, 40 + Math.random() * 110, 0.6 + Math.random() * 0.4, i % 4 ? 'heart' : 'spark2');
+  }
+  const p = game.player;
+  if (p && Math.hypot(p.x - x, p.y - y) < 900) { Sound.beep(988, 0.12, 'sine', 0.25); setTimeout(() => Sound.beep(1319, 0.2, 'sine', 0.25), 100); game.shake = Math.max(game.shake || 0, 6); }
+}
 function explosion(x, y) {
   for (let i = 0; i < 40; i++) {
     const a = Math.random() * TAU, s = 60 + Math.random() * 220;
@@ -666,7 +688,7 @@ function updateItems(dt) {
     h.t += dt;
     if (h.kind === 'bomb') {
       if (h.t < 0.65) { h.x += h.vx * dt; h.y += h.vy * dt; h.z = Math.sin(h.t / 0.65 * PI) * 45 + 6; }
-      else if (!h.landed) { h.landed = true; h.z = 0; for (let j = 0; j < 30; j++) spawn(h.x, h.y, 6, (Math.random() - 0.5) * 220, (Math.random() - 0.5) * 220, 60 + Math.random() * 60, 0.7, 'water'); }
+      else if (!h.landed) { h.landed = true; h.z = 0; for (let j = 0; j < 24; j++) spawn(h.x, h.y, 6, (Math.random() - 0.5) * 200, (Math.random() - 0.5) * 200, 20 + Math.random() * 40, 1.0, 'zz'); }
       if (h.t > 0.65 + 2.2) { game.hazards.splice(i, 1); continue; }
     } else if (h.kind === 'missile') {
       const tgt = h.target && game.karts.find(k => k.pid === h.target);
@@ -676,18 +698,17 @@ function updateItems(dt) {
         h.vx = Math.cos(a) * 950; h.vy = Math.sin(a) * 950;
       }
       h.x += h.vx * dt; h.y += h.vy * dt; h.z = 12;
-      if (Math.random() < 0.8) spawn(h.x - h.vx * 0.02, h.y - h.vy * 0.02, 12, 0, 0, 10, 0.5, 'smoke');
-      spawn(h.x - h.vx * 0.015, h.y - h.vy * 0.015, 12, 0, 0, 0, 0.15, 'fire');
-      if (h.t > 4) { explosion(h.x, h.y); game.hazards.splice(i, 1); continue; }
+      if (Math.random() < 0.7) spawn(h.x - h.vx * 0.02, h.y - h.vy * 0.02, 12, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, 10, 0.5, 'heart');
+      if (h.t > 4) { heartBurst(h.x, h.y); game.hazards.splice(i, 1); continue; }
       // 원격 대상에 도달하면 우리 화면에서는 폭발만 보여주고 판정은 상대 쪽에서
-      if (tgt && tgt.remote && Math.hypot(tgt.x - h.x, tgt.y - h.y) < 24) { explosion(h.x, h.y); game.hazards.splice(i, 1); continue; }
+      if (tgt && tgt.remote && Math.hypot(tgt.x - h.x, tgt.y - h.y) < 24) { heartBurst(h.x, h.y); game.hazards.splice(i, 1); continue; }
     }
     const R = h.kind === 'banana' ? 17 : h.kind === 'missile' ? 24 : (h.kind === 'bomb' && h.landed) ? 52 : -1;
     if (R < 0) continue;
     for (const k of game.karts) {
       if (k.remote || (k.z || 0) > 20) continue;
       if (h.kind === 'missile' && h.target && k.pid !== h.target) continue;
-      if (k.pid === h.owner && h.t < 0.6) continue;
+      if (k.pid === h.owner && (h.t < 0.6 || h.kind === 'bomb')) continue;
       if (h.kind === 'bomb' && k.bubble > 0) continue;
       if (Math.hypot(k.x - h.x, k.y - h.y) > R) continue;
       hitKart(k, h.kind);
@@ -702,7 +723,7 @@ function kartStatus(k, inp, dt) {
     k.rolling -= dt;
     if (k.rolling <= 0 && k.pending) {
       k.items.push(k.pending); k.pending = null;
-      if (k.isPlayer) { Sound.beep(784, 0.08, 'square', 0.15); setTimeout(() => Sound.beep(1175, 0.15, 'square', 0.15), 80); }
+      if (k.isPlayer) { Sound.beep(784, 0.08, 'square', 0.15); setTimeout(() => Sound.beep(1175, 0.15, 'square', 0.15), 80); const d = ITEM_DEFS[k.items[k.items.length - 1]]; message(`${d.icon} ${d.cell} 대기 중!`, '#ffffff', 0.9); }
     }
   }
   k.spin = Math.max(0, (k.spin || 0) - dt);
@@ -776,7 +797,7 @@ function aiItem(k, dt, inp) {
   let go = false;
   if (it === 'booster' || it === 'shield') go = T > 1.2;
   else if (it === 'banana') go = game.karts.some(o => o !== k && Math.hypot(o.x - k.x, o.y - k.y) < 160 && ((o.x - k.x) * Math.cos(k.h) + (o.y - k.y) * Math.sin(k.h)) < 0) || T > 6;
-  else if (it === 'bomb') go = dAhead < 380 || T > 5;
+  else if (it === 'bomb') go = dAhead < 480 || T > 6;
   else if (it === 'missile') go = (ahead && dAhead < 900) || T > 5;
   if (go) { inp.item = true; k.ai.itemT = 0; }
 }
@@ -848,13 +869,18 @@ function updateKart(k, inp, dt) {
   let sf = clamp(Math.abs(k.fwd) / 120, 0, 1);
   if ((inp.up || inp.down) && sf < 0.55) sf = 0.55;
   sf *= (k.fwd < -5 || (inp.down && !inp.up && k.fwd < 20)) ? -1 : 1;
+  // 부드러운 조향: 키를 눌러도 핸들이 서서히 꺾이고, 떼면 빠르게 돌아온다
+  const tgtSteer = inp.steer, cur = k.steerIn || 0;
+  const rate = (tgtSteer === 0 || Math.sign(tgtSteer) !== Math.sign(cur)) ? 11 : 6.5;
+  k.steerIn = cur + clamp(tgtSteer - cur, -rate * dt, rate * dt);
+  const st = k.steerIn;
   let turn;
-  if (k.drift) turn = (k.driftDir * 1.25 + inp.steer * 0.95) * sf;
-  else turn = inp.steer * 2.55 * sf * (1 - Math.min(0.3, Math.abs(k.fwd) / MAX_SPEED * 0.3));
-  turn *= ks.steer * (air ? 0.35 : 1);
+  if (k.drift) turn = (k.driftDir * 1.2 + st * 0.95) * sf;
+  else turn = st * 2.45 * sf * (1 - Math.min(0.32, Math.abs(k.fwd) / MAX_SPEED * 0.32));
+  turn *= ks.steer * (k.z > 10 ? 0.35 : 1);
   k.h += turn * dt;
   if (k.spin > 0) k.h += 13 * dt * Math.min(1, k.spin * 2);
-  k.steerVis = lerp(k.steerVis, inp.steer, dt * 10);
+  k.steerVis = lerp(k.steerVis, st, dt * 10);
 
   const fx = Math.cos(k.h), fy = Math.sin(k.h), rx = -fy, ry = fx;
   let fwd = k.vx * fx + k.vy * fy, lat = k.vx * rx + k.vy * ry;
@@ -879,6 +905,7 @@ function updateKart(k, inp, dt) {
   // 드리프트
   if (!k.drift && inp.drift && inp.steer !== 0 && fwd > 200 && !air) {
     k.drift = true; k.driftDir = inp.steer; k.driftTime = 0;
+    k.vz = 120; k.z = 0.5; // 드리프트 시작 시 살짝 점프 (홉)
     lat -= inp.steer * 40; // 뒤가 미끄러지는 느낌
   }
   if (k.drift) {
@@ -936,11 +963,14 @@ function updateKart(k, inp, dt) {
     k.x -= nX * over; k.y -= nY * over;
     const vn = k.vx * nX + k.vy * nY;
     if (vn > 0) {
-      k.vx -= nX * vn * 1.25; k.vy -= nY * vn * 1.25;
-      k.vx *= 0.82; k.vy *= 0.82;
+      // 벽에 튕기지 않고 미끄러지듯 따라가도록 (벽 쪽 속도만 제거)
+      k.vx -= nX * vn * 1.15; k.vy -= nY * vn * 1.15;
+      k.vx *= 0.94; k.vy *= 0.94;
+      const tA = tr.ang[k.idx], along2 = Math.cos(wrapA(k.h - tA));
+      if (Math.abs(along2) > 0.4) { const tgtA = along2 > 0 ? tA : tA + PI; k.h += wrapA(tgtA - k.h) * 0.25; }
       k.fwd = k.vx * fx + k.vy * fy;
-      if (vn > 120) { k.mood = 'angry'; k.moodT = 0.9; }
-      if (k.isPlayer && vn > 120 && k.bumpCd <= 0) { Sound.bump(); k.bumpCd = 0.3; game.shake = Math.min(12, vn / 30); }
+      if (vn > 200) { k.mood = 'angry'; k.moodT = 0.9; }
+      if (k.isPlayer && vn > 200 && k.bumpCd <= 0) { Sound.bump(); k.bumpCd = 0.3; game.shake = Math.min(12, vn / 30); }
       k.drift = false;
     }
   }
@@ -1022,7 +1052,7 @@ function collideKarts() {
       a.x -= nx * (min - d) * wa; a.y -= ny * (min - d) * wa; b.x += nx * (min - d) * wb; b.y += ny * (min - d) * wb;
       const rv = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
       if (rv < 0) {
-        const imp = -rv * 0.8;
+        const imp = -rv * 0.55;
         if (!a.remote) { a.vx -= nx * imp * wa; a.vy -= ny * imp * wa; }
         if (!b.remote) { b.vx += nx * imp * wb; b.vy += ny * imp * wb; }
         if (imp > 80) { a.mood = b.mood = 'angry'; a.moodT = b.moodT = 0.8; }
@@ -1123,6 +1153,7 @@ function update(dt) {
     else if (p.kind === 'confetti') { p.vz = Math.max(p.vz - 120 * dt, -45); p.vx += Math.sin(p.life * 9) * 30 * dt; }
     if (p.z < 0) p.z = 0;
   }
+  if (game.pops) for (let i = game.pops.length - 1; i >= 0; i--) { game.pops[i].t += dt; if (game.pops[i].t > 1.3) game.pops.splice(i, 1); }
   for (let i = game.messages.length - 1; i >= 0; i--) { game.messages[i].t -= dt; if (game.messages[i].t <= 0) game.messages.splice(i, 1); }
   if (game.goFlash) game.goFlash = Math.max(0, game.goFlash - dt);
   game.shake = Math.max(0, (game.shake || 0) - dt * 30);
@@ -1131,8 +1162,8 @@ function update(dt) {
   const p = game.player, cam = game.cam;
   const sp = Math.hypot(p.vx, p.vy);
   const velA = sp > 60 && p.fwd > 0 ? Math.atan2(p.vy, p.vx) : p.h;
-  const targetH = p.h + wrapA(velA - p.h) * 0.55;
-  cam.h += wrapA(targetH - cam.h) * Math.min(1, dt * 4.5);
+  const targetH = p.h + wrapA(velA - p.h) * (p.drift ? 0.4 : 0.12);
+  cam.h += wrapA(targetH - cam.h) * (1 - Math.exp(-(p.drift ? 4.5 : 6.5) * dt));
   cam.fov = lerp(cam.fov, 60 + Math.min(1, Math.abs(p.fwd) / MAX_SPEED) * 8 + (p.boost > 0 ? 9 : 0), Math.min(1, dt * 3));
 
   Sound.engine(p.fwd, game.state !== 'menu');
@@ -1590,6 +1621,18 @@ const Gfx = (() => {
     brow: new THREE.MeshPhysicalMaterial({ color: 0x3b2316, roughness: 0.5 }),
     mouthIn: new THREE.MeshBasicMaterial({ color: 0x7a2630 }),
     tongue: new THREE.MeshBasicMaterial({ color: 0xff7f8f }),
+    gloss: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false }),
+    membrane: new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.05, clearcoat: 1, transparent: true, opacity: 0.06, depthWrite: false }),
+    redBand: new THREE.MeshPhysicalMaterial({ color: 0xe63946, roughness: 0.4, clearcoat: 0.6 }),
+    flameO: std({ color: 0xff6a00, emissive: 0xff4a00, emissiveIntensity: 1.2, transparent: true, opacity: 0.92 }),
+    flameY: std({ color: 0xffd23f, emissive: 0xffb300, emissiveIntensity: 1.2, transparent: true, opacity: 0.92 }),
+    dough: new THREE.MeshPhysicalMaterial({ color: 0xd9a066, roughness: 0.6 }),
+    icing: new THREE.MeshPhysicalMaterial({ color: 0xff7fb0, roughness: 0.25, clearcoat: 1 }),
+    sprY: std({ color: 0xffe066 }), sprB: std({ color: 0x4fc3ff }), sprW: std({ color: 0xffffff }),
+    capBlue: new THREE.MeshPhysicalMaterial({ color: 0x5b6fd6, roughness: 0.7 }),
+    heart: new THREE.MeshPhysicalMaterial({ color: 0xff2d55, roughness: 0.2, clearcoat: 1, emissive: 0x550012, emissiveIntensity: 0.6 }),
+    bulbBase: new THREE.MeshPhysicalMaterial({ color: 0xb8bec6, metalness: 0.8, roughness: 0.3 }),
+    bulb: std({ color: 0xfff2a8, emissive: 0xffd23f, emissiveIntensity: 1.3, transparent: true, opacity: 0.95 }),
     tear: new THREE.MeshPhysicalMaterial({ color: 0x8fd6ff, roughness: 0.05, clearcoat: 1, transparent: true, opacity: 0.85 }),
     whitePaint: new THREE.MeshPhysicalMaterial({ color: 0xf6f8fa, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.1 }),
     shine: new THREE.MeshBasicMaterial({ color: 0xffffff }),
@@ -1605,6 +1648,13 @@ const Gfx = (() => {
     tireG: (() => { const g = new THREE.CylinderGeometry(1, 1, 1, 20); g.rotateX(PI / 2); return g; })(),
     rimG: (() => { const g = new THREE.CylinderGeometry(0.62, 0.62, 1.04, 12); g.rotateX(PI / 2); return g; })(),
   };
+  // 하트 모양 (로컬 XY 평면, +z 를 바라봄)
+  const heartSph = new THREE.SphereGeometry(1, 16, 12), heartCone = new THREE.ConeGeometry(1, 1.3, 16);
+  function heartShape(parent, s, mat) {
+    for (const x of [-0.48, 0.48]) { const m = new THREE.Mesh(heartSph, mat); m.scale.set(0.58 * s, 0.58 * s, 0.4 * s); m.position.set(x * s, 0.2 * s, 0); parent.add(m); }
+    const c = new THREE.Mesh(heartCone, mat); c.scale.set(0.95 * s, 1.0 * s, 0.4 * s); c.rotation.z = PI; c.position.set(0, -0.55 * s, 0); parent.add(c);
+    return parent;
+  }
   const plateCache = {};
   function plateTex(n, color) {
     const key = n + color;
@@ -1618,7 +1668,7 @@ const Gfx = (() => {
     }, { repeat: false }));
   }
   function makeKartMesh(k) {
-    const S = kartShared, model = k.kart || 'racer', ch = k.char || 'helmet';
+    const S = kartShared, model = k.kart || 'racer', ch = k.char || 'passion';
     const root = new THREE.Group(), tilt = new THREE.Group(), body = new THREE.Group(); root.add(tilt); tilt.add(body);
     const paint = new THREE.MeshPhysicalMaterial({ color: k.color, metalness: 0.25, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.12 });
     const suit = std({ color: new THREE.Color(k.color).multiplyScalar(0.55), roughness: 0.75 });
@@ -1702,123 +1752,99 @@ const Gfx = (() => {
     const col = add(new THREE.CylinderGeometry(0.6, 0.6, 9, 6), S.dark, 7, 9, 0); col.rotation.z = 1.0;
     const wheelM = add(new THREE.TorusGeometry(3.3, 0.6, 6, 16), S.dark, 5, 12, 0); wheelM.rotation.y = PI / 2; wheelM.rotation.x = 0.5;
 
-    // ---- 드라이버: 후드 슈트를 입은 2등신 캐릭터 (표정 변화) ----
+    // ---- 드라이버: 말랑말랑 세포 캐릭터 (표정 변화) ----
     const cdef = CHARS.find(c => c.id === ch) || CHARS[0];
-    const toy = (color, o = {}) => new THREE.MeshPhysicalMaterial({ color, roughness: 0.42, clearcoat: 0.45, clearcoatRoughness: 0.35, ...o });
-    const hoodCol = new THREE.Color(k.color).multiplyScalar(0.9);
-    const hoodM = toy(hoodCol), hoodDark = toy(hoodCol.clone().multiplyScalar(0.72)), rimM = toy(hoodCol.clone().lerp(new THREE.Color('#ffffff'), 0.45));
-    const skinM = toy(cdef.skin, { clearcoat: 0.15, roughness: 0.55 });
-    const innerM = toy(cdef.inner || '#ffffff');
+    const cellCol = new THREE.Color(cdef.color);
+    const cellM = new THREE.MeshPhysicalMaterial({ color: cellCol, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.15 });
+    const cellDark = new THREE.MeshPhysicalMaterial({ color: cellCol.clone().multiplyScalar(0.78), roughness: 0.3, clearcoat: 0.8 });
     const SPH = new THREE.SphereGeometry(1, 32, 24);
     const ball = (mat, x, y, z, sx, sy = sx, sz = sx, parent = body) => { const m = add(SPH, mat, x, y, z, parent); m.scale.set(sx, sy, sz); return m; };
-    const anim = { ears: [], eyes: [], moods: {}, mood: 'base', head: null, seed: Math.random() * 10 };
+    const anim = { ears: [], eyes: [], moods: {}, mood: 'base', head: null, seed: Math.random() * 10, headY: 20.5 };
 
-    // 몸통: 레이싱 슈트 + 흰 줄무늬 + 벨트
-    ball(hoodM, -5, 13, 0, 4.6, 5.4, 5.2);
-    for (const s of [-1, 1]) ball(S.white, -4.6, 13.4, s * 4.75, 3.2, 4.6, 0.45);
-    const belt = add(new THREE.TorusGeometry(4.9, 0.55, 8, 28), S.belt, -5, 10.4, 0); belt.rotation.x = PI / 2; belt.scale.set(1, 1.05, 1);
-    const buckle = add(new THREE.CylinderGeometry(1.15, 1.15, 0.6, 20), S.buckle, -0.15, 10.4, 0); buckle.rotation.z = PI / 2;
-    add(new THREE.CylinderGeometry(0.6, 0.6, 0.7, 16), S.buckleGlow, 0.05, 10.4, 0).rotation.z = PI / 2;
-    // 팔 (흰 소매 끝) + 통통한 장갑
+    // 몸 = 머리 = 하나의 젤리 같은 세포 (살짝 길쭉한 콩 모양)
+    const CA = 8.2, CB = 9.4, CC = 8.4;
+    const head = new THREE.Group(); head.position.set(-3.8, anim.headY, 0); body.add(head); anim.head = head;
+    ball(cellM, 0, 0, 0, CA, CB, CC, head);
+    // 젤리 광택 + 세포막 테두리 느낌
+    const gloss = ball(S.gloss, -1.5, 4.6, 3.2, 2.4, 3.2, 1.2, head); gloss.rotation.set(0.3, -0.5, 0.4); gloss.castShadow = false;
+    const shell = ball(S.membrane, 0, 0, 0, CA * 1.08, CB * 1.06, CC * 1.08, head); shell.castShadow = false;
+    // 작은 팔 두 개로 핸들을 꼭 잡음
     for (const s of [-1, 1]) {
-      tube(V(-5, 16.4, s * 4.6), V(2.4, 13, s * 3.6), 1.45, hoodM);
-      const cuff = add(new THREE.CylinderGeometry(1.6, 1.6, 1.1, 14), S.white, 2.6, 12.9, s * 3.5); cuff.rotation.z = 1.15;
-      ball(S.glove, 4.4, 12.4, s * 3.2, 1.95, 1.75, 1.85);
-      ball(S.glove, 4.9, 13.9, s * 2.2, 0.8, 1.1, 0.8); // 엄지
+      tube(V(-2.5, 15.5, s * 6.8), V(3.6, 12.8, s * 3.6), 1.5, cellM);
+      ball(cellM, 4.4, 12.5, s * 3.2, 1.9, 1.7, 1.8);
     }
 
-    // 머리: 큰 후드 + 앞으로 드러난 얼굴
-    const HR = 7.6;                       // 후드 반지름
-    const head = new THREE.Group(); head.position.set(-3.6, 25.6, 0); body.add(head); anim.head = head;
-    ball(hoodM, 0, 0, 0, HR, HR * 0.97, HR, head);
-    // 얼굴 = 후드 앞으로 튀어나온 타원체 (교차면이 자연스러운 후드 구멍이 됨)
-    const FC = new THREE.Vector3(4.2, -0.7, 0), FA = 4.1, FB = 5.0, FCZ = 5.5;
-    ball(skinM, FC.x, FC.y, FC.z, FA, FB, FCZ, head);
-    const rim = add(new THREE.TorusGeometry(5.35, 0.95, 12, 40), rimM, 6.05, -0.55, 0, head); rim.rotation.y = PI / 2; rim.scale.set(1, 0.97, 1);
-    // 이마 앞머리 (후드 색)
-    for (const [z, y, sz, rz] of [[-2.3, 3.55, 2.2, -0.35], [0, 3.95, 2.5, 0], [2.3, 3.55, 2.2, 0.35]]) ball(hoodDark, 6.55, y, z, 0.9, sz * 0.55, sz, head).rotation.x = rz;
-
-    // 얼굴 표면 위의 점 (y: 위아래, z: 좌우)
+    // 얼굴 표면 위의 점 (y: 위아래, z: 좌우) — 타원체 앞쪽
     const Z = new THREE.Vector3(0, 0, 1);
     const onFace = (mesh, y, z, lift = 0, parent = head) => {
-      const yy = (y - FC.y) / FB, zz = z / FCZ, t = Math.max(0.02, 1 - yy * yy - zz * zz);
-      const x = FC.x + FA * Math.sqrt(t);
-      const n = new THREE.Vector3((x - FC.x) / (FA * FA), (y - FC.y) / (FB * FB), z / (FCZ * FCZ)).normalize();
+      const yy = y / CB, zz = z / CC, t = Math.max(0.02, 1 - yy * yy - zz * zz);
+      const x = CA * Math.sqrt(t);
+      const n = new THREE.Vector3(x / (CA * CA), y / (CB * CB), z / (CC * CC)).normalize();
       mesh.position.set(x, y, z).addScaledVector(n, lift);
       mesh.quaternion.setFromUnitVectors(Z, n);
       mesh.castShadow = false; parent.add(mesh); return mesh;
     };
     const eyeG = new THREE.SphereGeometry(1, 20, 16);
     const mood = name => { const g = new THREE.Group(); g.visible = name === 'base'; head.add(g); anim.moods[name] = g; return g; };
-    const ovalEye = (g, z, blinkable = true) => {
-      const eg = new THREE.Group(); onFace(eg, 0.35, z, -0.05, g);
-      const e = new THREE.Mesh(eyeG, S.eye); e.scale.set(0.95, 1.5, 0.45); eg.add(e);
-      const h1 = new THREE.Mesh(eyeG, S.shine); h1.scale.setScalar(0.42); h1.position.set(-0.25, 0.6, 0.38); eg.add(h1);
-      const h2 = new THREE.Mesh(eyeG, S.shine); h2.scale.setScalar(0.18); h2.position.set(0.3, -0.5, 0.4); eg.add(h2);
+    const EY = 1.6, EZ = 2.7;
+    const dotEye = (g, z, blinkable = true, s = 1) => {
+      const eg = new THREE.Group(); onFace(eg, EY, z, -0.05, g);
+      const e = new THREE.Mesh(eyeG, S.eye); e.scale.set(1.05 * s, 1.45 * s, 0.5); eg.add(e);
+      const h1 = new THREE.Mesh(eyeG, S.shine); h1.scale.setScalar(0.45 * s); h1.position.set(-0.3, 0.55, 0.4); eg.add(h1);
+      const h2 = new THREE.Mesh(eyeG, S.shine); h2.scale.setScalar(0.2 * s); h2.position.set(0.32, -0.5, 0.42); eg.add(h2);
       if (blinkable) anim.eyes.push(eg);
       return eg;
     };
-    const arcEye = (g, z, up = true) => { // ^ 모양 감은 눈
-      const m = onFace(new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.3, 8, 18, PI), S.eye), 0.1, z, 0.02, g);
-      if (!up) m.rotateZ(PI); return m;
+    const arcEye = (g, z, up = true) => { const m = onFace(new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.32, 8, 18, PI), S.eye), EY - 0.3, z, 0.02, g); if (!up) m.rotateZ(PI); return m; };
+    const lineEye = (g, z) => { const m = onFace(new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.45, 0.3), S.eye), EY - 0.4, z, 0.05, g); return m; };
+    const brow = (g, z, tilt, y = EY + 2.4) => { const b = onFace(new THREE.Mesh(eyeG, S.brow), y, z, 0.05, g); b.scale.set(1.3, 0.38, 0.3); b.rotateZ(-Math.sign(z) * tilt); return b; };
+    const mouthArc = (g, w, frown = false, y = -1.6) => { const m = onFace(new THREE.Mesh(new THREE.TorusGeometry(w, 0.26, 6, 16, PI), S.mouth), y, 0, 0.02, g); if (!frown) m.rotateZ(PI); return m; };
+    const openMouth = (g, y = -1.7) => {
+      onFace(new THREE.Mesh(new THREE.CircleGeometry(1.3, 20, PI, PI), S.mouthIn), y + 0.45, 0, 0.06, g).scale.set(1, 1.15, 1);
+      onFace(new THREE.Mesh(new THREE.CircleGeometry(0.7, 16, PI, PI), S.tongue), y, 0, 0.09, g);
     };
-    const brow = (g, z, tilt, y = 2.35) => { // 굵은 눈썹 (tilt>0: 화난/결연한 표정)
-      const b = onFace(new THREE.Mesh(eyeG, S.brow), y, z, 0.05, g);
-      b.scale.set(1.75, 0.5, 0.35); b.rotateZ(-Math.sign(z) * tilt); return b;
-    };
-    const mouthArc = (g, w, frown = false, y = -2.4) => {
-      const m = onFace(new THREE.Mesh(new THREE.TorusGeometry(w, 0.24, 6, 16, PI), S.mouth), y, 0, 0.02, g);
-      if (!frown) m.rotateZ(PI); return m;
-    };
-    const openMouth = (g, y = -2.5) => {
-      const m = onFace(new THREE.Mesh(new THREE.CircleGeometry(1.15, 20, PI, PI), S.mouthIn), y + 0.4, 0, 0.06, g); m.scale.set(1, 1.15, 1);
-      onFace(new THREE.Mesh(new THREE.CircleGeometry(0.62, 16, PI, PI), S.tongue), y - 0.05, 0, 0.09, g);
-    };
-    // 볼터치는 항상
-    for (const s of [-1, 1]) onFace(new THREE.Mesh(new THREE.CircleGeometry(1.05, 20), S.blush), -1.3, s * 3.3, 0.04).scale.set(1.2, 0.8, 1);
+    for (const s of [-1, 1]) onFace(new THREE.Mesh(new THREE.CircleGeometry(1.15, 20), S.blush), -0.3, s * 4.6, 0.04).scale.set(1.25, 0.8, 1);
 
     // 표정 세트
-    { const g = mood('base'); ovalEye(g, -1.9); ovalEye(g, 1.9); brow(g, -2.0, 0.28); brow(g, 2.0, 0.28); mouthArc(g, 0.65); }
-    { const g = mood('wink'); ovalEye(g, -1.9, false); arcEye(g, 1.9); brow(g, -2.0, 0.28); brow(g, 2.0, -0.1, 2.15); mouthArc(g, 0.85); }
-    { const g = mood('joy'); arcEye(g, -1.9); arcEye(g, 1.9); brow(g, -2.0, -0.12, 2.6); brow(g, 2.0, -0.12, 2.6); openMouth(g); }
-    { const g = mood('angry'); ovalEye(g, -1.9, false); ovalEye(g, 1.9, false); brow(g, -1.8, 0.6, 2.0); brow(g, 1.8, 0.6, 2.0); mouthArc(g, 0.6, true, -2.7); }
-    { const g = mood('sad'); ovalEye(g, -1.9, false); ovalEye(g, 1.9, false); brow(g, -2.0, -0.5, 2.5); brow(g, 2.0, -0.5, 2.5); mouthArc(g, 0.6, true, -2.7);
-      const tear = onFace(new THREE.Mesh(eyeG, S.tear), -0.9, -2.6, 0.3, g); tear.scale.set(0.45, 0.7, 0.35); }
+    { const g = mood('base'); dotEye(g, -EZ); dotEye(g, EZ); mouthArc(g, 0.75); }
+    { const g = mood('wink'); dotEye(g, -EZ, false); arcEye(g, EZ); mouthArc(g, 0.95); }
+    { const g = mood('joy'); arcEye(g, -EZ); arcEye(g, EZ); openMouth(g); }
+    { const g = mood('angry'); dotEye(g, -EZ, false, 0.85); dotEye(g, EZ, false, 0.85); brow(g, -EZ, 0.55); brow(g, EZ, 0.55); mouthArc(g, 0.6, true, -2); }
+    { const g = mood('sad'); dotEye(g, -EZ, false); dotEye(g, EZ, false); brow(g, -EZ, -0.45); brow(g, EZ, -0.45); mouthArc(g, 0.6, true, -2);
+      onFace(new THREE.Mesh(eyeG, S.tear), 0, -EZ - 0.4, 0.3, g).scale.set(0.5, 0.75, 0.35); }
+    { const g = mood('sleep'); lineEye(g, -EZ); lineEye(g, EZ); onFace(new THREE.Mesh(new THREE.CircleGeometry(0.6, 16), S.mouthIn), -1.8, 0, 0.05, g); }
+    { const g = mood('love'); for (const s of [-1, 1]) { const hg = new THREE.Group(); onFace(hg, EY, s * EZ, 0.1, g); heartShape(hg, 1.1, S.heart); } openMouth(g); }
 
-    // 후드 장식 (캐릭터별)
-    const hs = (yaw, pitch, r = HR) => new THREE.Vector3(Math.cos(pitch) * Math.cos(yaw), Math.sin(pitch), Math.cos(pitch) * Math.sin(yaw)).multiplyScalar(r);
-    if (ch === 'helmet') {        // 동글동글 방울 귀
-      for (const s of [-1, 1]) { const p = hs(s * 1.25, 0.62, HR * 0.95); const e = ball(hoodM, p.x - 0.8, p.y, p.z, 4.0, 4.0, 4.0, head); anim.ears.push({ g: e, base: e.rotation.clone(), side: s, bob: true, y0: e.position.y }); }
-    } else if (ch === 'bunny') {  // 긴 토끼 귀
-      for (const s of [-1, 1]) {
-        const ear = new THREE.Group(); ear.position.copy(hs(s * 0.5, 1.1, HR * 0.85)); ear.rotation.set(s * 0.2, 0, 0.12); head.add(ear);
-        ball(hoodM, 0, 5, 0, 2.1, 5.6, 1.6, ear); ball(innerM, 1.15, 5, 0, 0.7, 4.4, 1.05, ear);
-        anim.ears.push({ g: ear, base: ear.rotation.clone(), side: s });
+    // 세포별 머리 장식
+    const top = new THREE.Group(); top.position.set(-0.5, CB * 0.96, 0); head.add(top);
+    if (ch === 'passion') {        // 열정 세포: 타오르는 불꽃 머리 + 머리띠
+      const band = add(new THREE.TorusGeometry(7.6, 0.9, 10, 32), S.redBand, 0, 3.6, 0, head); band.rotation.x = PI / 2; band.scale.set(1.0, 1.02, 1);
+      for (const [x, z, h, r, m] of [[0, 0, 7.5, 2.4, S.flameO], [-1.2, -1.8, 5, 1.7, S.flameY], [-1, 1.9, 5.4, 1.7, S.flameY], [1.2, 0, 4.2, 1.4, S.flameY]]) {
+        const f = add(new THREE.ConeGeometry(r, h, 14), m, x, h / 2 - 0.6, z, top); anim.ears.push({ g: f, flame: true, base: f.scale.clone(), seed: Math.random() * 6 });
       }
-    } else if (ch === 'bear') {   // 동그란 곰 귀
-      for (const s of [-1, 1]) {
-        const ear = new THREE.Group(); ear.position.copy(hs(s * 0.85, 0.85, HR * 0.93)); head.add(ear);
-        ball(hoodM, 0, 0, 0, 2.0, 3.0, 3.0, ear); ball(innerM, 1.1, -0.1, 0, 1.0, 1.8, 1.8, ear);
-        anim.ears.push({ g: ear, base: ear.rotation.clone(), side: s, small: true });
-      }
-    } else if (ch === 'cat') {    // 뾰족 고양이 귀
-      for (const s of [-1, 1]) {
-        const ear = new THREE.Group(); ear.position.copy(hs(s * 0.68, 0.88, HR * 0.86)); ear.rotation.set(s * 0.42, 0, -0.08); head.add(ear);
-        add(new THREE.ConeGeometry(3.1, 5.4, 24), hoodM, 0, 2.4, 0, ear);
-        add(new THREE.ConeGeometry(1.8, 3.4, 20), innerM, 1.0, 2.0, 0, ear);
-        anim.ears.push({ g: ear, base: ear.rotation.clone(), side: s, small: true });
-      }
-      for (const s of [-1, 1]) for (const dy of [-1.3, -1.9]) { // 수염
-        const w = onFace(new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 3.2, 4), S.mouth), dy, s * 4.3, 0.05); w.rotateZ(PI / 2 + s * (dy + 1.6) * 0.5);
-      }
-    } else if (ch === 'robot') {  // 안테나 + 볼트 귀
-      add(new THREE.CylinderGeometry(0.35, 0.35, 4.2, 8), S.dark, -0.5, HR + 1.6, 0, head);
-      const bulb = add(new THREE.SphereGeometry(1.4, 16, 12), S.redGlow, -0.5, HR + 4.1, 0, head);
-      anim.ears.push({ g: bulb, base: bulb.rotation.clone(), side: 1, antenna: true });
-      for (const s of [-1, 1]) {
-        const d = add(new THREE.CylinderGeometry(2.4, 2.4, 1.6, 24), S.robotHead, -0.5, 0.5, s * HR * 0.98, head); d.rotation.x = PI / 2;
-        add(new THREE.CylinderGeometry(1.1, 1.1, 1.8, 16), S.buckleGlow, -0.5, 0.5, s * HR * 1.0, head).rotation.x = PI / 2;
-      }
+    } else if (ch === 'yum') {     // 냠냠 세포: 도넛 모자 + 침 한 방울
+      const d = add(new THREE.TorusGeometry(2.8, 1.3, 12, 24), S.dough, 0, 1, 0, top); d.rotation.x = PI / 2;
+      const ic = add(new THREE.TorusGeometry(2.8, 1.05, 12, 24), S.icing, 0, 1.55, 0, top); ic.rotation.x = PI / 2; ic.scale.set(1, 1, 0.75);
+      for (let i = 0; i < 10; i++) { const a = i / 10 * TAU; const sp = add(new THREE.BoxGeometry(0.9, 0.3, 0.3), [S.sprY, S.sprB, S.sprW][i % 3], Math.cos(a) * 2.8, 2.35, Math.sin(a) * 2.8, top); sp.rotation.y = a * 3; }
+      top.rotation.z = -0.25; anim.ears.push({ g: top, bob: true, y0: top.position.y });
+      onFace(new THREE.Mesh(eyeG, S.tear), -2.6, 1.2, 0.2).scale.set(0.35, 0.6, 0.3);
+    } else if (ch === 'sleepy') {  // 쿨쿨 세포: 축 늘어진 수면 모자
+      const cap = new THREE.Group(); cap.position.set(0, -1.6, 0); top.add(cap);
+      add(new THREE.TorusGeometry(5.6, 1.3, 10, 28), S.white, 0, 0, 0, cap).rotation.x = PI / 2;
+      const c1 = add(new THREE.ConeGeometry(5.4, 8, 20), S.capBlue, 0, 4, 0, cap);
+      const tip = new THREE.Group(); tip.position.set(0, 8, 0); tip.rotation.z = 1.2; cap.add(tip);
+      add(new THREE.ConeGeometry(2.4, 6, 16), S.capBlue, 0, 2.4, 0, tip);
+      add(new THREE.SphereGeometry(1.5, 12, 10), S.white, 0, 5.4, 0, tip);
+      anim.ears.push({ g: tip, base: tip.rotation.clone(), side: 1 }); void c1;
+    } else if (ch === 'heart') {   // 두근 세포: 통통 튀는 하트 더듬이
+      const stalk = add(new THREE.CylinderGeometry(0.35, 0.35, 4, 8), cellDark, 0, 2, 0, top);
+      const hg = new THREE.Group(); hg.position.set(0, 5.6, 0); top.add(hg); heartShape(hg, 2.4, S.heart); hg.rotation.y = PI / 2;
+      anim.ears.push({ g: hg, beat: true }); void stalk;
+    } else if (ch === 'spark') {   // 반짝 세포: 반짝이는 전구 더듬이
+      add(new THREE.CylinderGeometry(1.2, 1.4, 1.8, 14), S.bulbBase, 0, 0.9, 0, top);
+      const bulb = add(new THREE.SphereGeometry(2.4, 18, 14), S.bulb, 0, 3.6, 0, top);
+      anim.ears.push({ g: bulb, glow: true });
+      for (let i = 0; i < 5; i++) { const a = i / 5 * TAU; add(new THREE.SphereGeometry(0.45, 8, 6), S.bulb, Math.cos(a) * 4.3, 3.8 + Math.sin(a * 2) * 0.8, Math.sin(a) * 4.3, top); }
     }
     for (const e of anim.eyes) e.userData.sy = e.scale.y;
     body.position.y = lift;
@@ -1875,17 +1901,19 @@ const Gfx = (() => {
       const t = p.life / p.max;
       let sys, n, c, size, a;
       const k2 = p.kind;
-      if (k2 === 'fire' || k2 === 'blue' || k2 === 'spark1' || k2 === 'spark2' || k2 === 'boom' || k2 === 'wind') {
+      if (k2 === 'fire' || k2 === 'blue' || k2 === 'spark1' || k2 === 'spark2' || k2 === 'boom' || k2 === 'wind' || k2 === 'heart') {
         if (ng >= MAXP) continue; sys = glowSys; n = ng++;
         if (k2 === 'fire') { c = [1, 0.45 + 0.4 * t, 0.12 * t]; size = 1.5 + 4 * t; a = 0.75 * t; }
         else if (k2 === 'blue') { c = [0.25, 0.7 + 0.2 * t, 1]; size = 1.5 + 4 * t; a = 0.75 * t; }
         else if (k2 === 'spark1') { c = [0.4, 0.8, 1]; size = 1.6; a = t; }
         else if (k2 === 'spark2') { c = [1, 0.62, 0.18]; size = 2; a = t; }
         else if (k2 === 'boom') { c = [1, 0.75 * t + 0.2, 0.2 * t]; size = 6 + 10 * (1 - t); a = t; }
+        else if (k2 === 'heart') { c = [1, 0.3, 0.55]; size = 3 + 3 * t; a = t; }
         else { c = [0.8, 0.95, 1]; size = 1.2; a = 0.5 * t; }
       } else {
         if (ns >= MAXP) continue; sys = smokeSys; n = ns++;
         if (k2 === 'confetti') { c = p.c; size = 3.2; a = Math.min(1, t * 3); }
+        else if (k2 === 'zz') { c = [0.78, 0.72, 1]; size = 6 + (1 - t) * 10; a = 0.6 * t; }
         else if (k2 === 'water') { c = [0.55, 0.82, 1]; size = 5 + (1 - t) * 6; a = 0.7 * t; }
         else {
           c = k2 === 'dirt' ? curTrack.def.theme.dust : [0.88, 0.88, 0.9];
@@ -1940,27 +1968,55 @@ const Gfx = (() => {
     water: new THREE.MeshPhysicalMaterial({ color: 0x5ec8ff, roughness: 0.05, clearcoat: 1, transparent: true, opacity: 0.6, depthWrite: false }),
     missile: new THREE.MeshPhysicalMaterial({ color: 0xf2f4f7, roughness: 0.3, clearcoat: 1 }),
     missileRed: new THREE.MeshPhysicalMaterial({ color: 0xe63946, roughness: 0.3, clearcoat: 1 }),
-    shield: new THREE.MeshBasicMaterial({ color: 0x66e0ff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }),
-    bubble: new THREE.MeshPhysicalMaterial({ color: 0xbfeaff, roughness: 0.02, clearcoat: 1, transparent: true, opacity: 0.38, depthWrite: false }),
+    shield: new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.24, blending: THREE.AdditiveBlending, depthWrite: false }),
+    bubble: new THREE.MeshPhysicalMaterial({ color: 0xd9ccff, roughness: 0.4, clearcoat: 0.5, transparent: true, opacity: 0.45, depthWrite: false }),
+    cloud: new THREE.MeshPhysicalMaterial({ color: 0xe6e0ff, roughness: 0.6, transparent: true, opacity: 0.88, depthWrite: false }),
+    arrow: new THREE.MeshPhysicalMaterial({ color: 0xffd23f, metalness: 0.6, roughness: 0.3 }),
+    feather: new THREE.MeshPhysicalMaterial({ color: 0xffb3c6, roughness: 0.5, side: THREE.DoubleSide }),
   };
   function hazMesh(kind) {
     const g = new THREE.Group();
-    if (kind === 'banana') {
-      const b = new THREE.Mesh(new THREE.TorusGeometry(6, 2.3, 10, 20, PI * 0.9), M.banana); b.rotation.z = 0.2; b.position.y = 3; b.castShadow = true; g.add(b);
-      const t = new THREE.Mesh(new THREE.SphereGeometry(1.4, 8, 6), M.bananaTip); t.position.set(6, 4.5, 0); g.add(t);
-      const peel = new THREE.Mesh(new THREE.TorusGeometry(4, 1.6, 8, 12, PI * 0.7), M.banana); peel.rotation.set(PI / 2, 0, 1); peel.position.y = 1; g.add(peel);
-    } else if (kind === 'bomb') {
-      const s = new THREE.Mesh(new THREE.SphereGeometry(8, 24, 16), M.water); g.add(s); g.userData.ball = s;
-      const hl = new THREE.Mesh(new THREE.SphereGeometry(2, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff })); hl.position.set(-3, 4, 3); s.add(hl);
-    } else if (kind === 'missile') {
-      const body = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 16, 14), M.missile); body.rotation.z = PI / 2; body.castShadow = true; g.add(body);
-      const nose = new THREE.Mesh(new THREE.ConeGeometry(2.6, 6, 14), M.missileRed); nose.rotation.z = -PI / 2; nose.position.x = 11; g.add(nose);
-      for (let i = 0; i < 4; i++) { const f = new THREE.Mesh(new THREE.BoxGeometry(4, 0.6, 5), M.missileRed); f.position.x = -6.5; f.rotation.x = i * PI / 2; f.translateZ(3); g.add(f); }
+    if (kind === 'banana') {       // 냠냠 세포의 도넛 함정
+      const d = new THREE.Mesh(new THREE.TorusGeometry(6, 2.8, 12, 24), kartShared.dough); d.rotation.x = PI / 2; d.position.y = 2.8; d.castShadow = true; g.add(d);
+      const ic = new THREE.Mesh(new THREE.TorusGeometry(6, 2.3, 12, 24), kartShared.icing); ic.rotation.x = PI / 2; ic.position.y = 4; ic.scale.set(1, 1, 0.7); g.add(ic);
+      for (let i = 0; i < 12; i++) { const a = i / 12 * TAU; const sp = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.5, 0.5), [kartShared.sprY, kartShared.sprB, kartShared.sprW][i % 3]); sp.position.set(Math.cos(a) * 6, 5.6, Math.sin(a) * 6); sp.rotation.y = a * 2.3; g.add(sp); }
+    } else if (kind === 'bomb') {  // 쿨쿨 세포의 졸음 구름
+      const c = new THREE.Group(); g.add(c); g.userData.ball = c;
+      for (const [x, y, z, r] of [[0, 0, 0, 7], [-6, -1, 2, 5], [6, -1, -1, 5.5], [1, 3, -4, 4.5], [-2, 2, 5, 4]]) { const m = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), M.cloud); m.position.set(x, y, z); c.add(m); }
+    } else if (kind === 'missile') { // 두근 세포의 두근 화살
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 20, 8), M.arrow); shaft.rotation.z = PI / 2; g.add(shaft);
+      const hg = new THREE.Group(); hg.position.x = 12; hg.rotation.y = PI / 2; g.add(hg); heartShape(hg, 4.5, kartShared.heart);
+      for (const s of [-1, 1]) { const f = new THREE.Mesh(new THREE.BoxGeometry(5, 0.4, 3.2), M.feather); f.position.set(-9, 0, s * 1.6); f.rotation.y = s * 0.4; g.add(f); }
     }
     itemGroup.add(g);
     return g;
   }
+  const popPool = [];
+  function popMesh() {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.2, clearcoat: 1 });
+    const b = new THREE.Mesh(new THREE.SphereGeometry(6, 20, 16), mat); b.scale.set(1, 1.12, 1); g.add(b);
+    for (const z of [-2, 2]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.9, 10, 8), kartShared.eye); e.position.set(5.4, 1, z); e.scale.set(0.5, 1.3, 1); g.add(e); }
+    const m = new THREE.Mesh(new THREE.TorusGeometry(1, 0.25, 6, 12, PI), kartShared.mouth); m.position.set(5.6, -1.4, 0); m.rotation.set(0, PI / 2, PI); g.add(m);
+    g.userData.mat = mat; itemGroup.add(g); return g;
+  }
+  function syncPops() {
+    const pops = game.pops || [];
+    while (popPool.length < pops.length) popPool.push(popMesh());
+    popPool.forEach((g, i) => {
+      const pp = pops[i];
+      g.visible = !!pp;
+      if (!pp) return;
+      const c = CHARS.find(x => x.id === pp.char) || CHARS[0];
+      g.userData.mat.color.set(c.color);
+      const sc = pp.t < 0.2 ? pp.t / 0.2 * 1.2 : pp.t > 1.05 ? Math.max(0, (1.3 - pp.t) / 0.25) : 1 + Math.sin(pp.t * 18) * 0.05;
+      g.scale.setScalar(sc);
+      g.position.set(pp.k.x, ROAD_Y + (pp.k.z || 0) + 40 + pp.t * 14, pp.k.y);
+      g.rotation.y = -pp.k.h + Math.sin(pp.t * 10) * 0.3;
+    });
+  }
   function syncItems(dt) {
+    syncPops();
     const t = performance.now() / 1000;
     const boxes = game.boxes || [];
     if (boxesRef !== boxes) {
@@ -1986,8 +2042,8 @@ const Gfx = (() => {
       else if (h.kind === 'missile') { m.rotation.y = -Math.atan2(h.vy, h.vx); m.rotation.x = t * 12; }
       else if (h.kind === 'bomb') {
         const ball = m.userData.ball;
-        if (h.landed) { const s = 1 + Math.sin(t * 6) * 0.04, grow = Math.min(1, (h.t - 0.65) / 0.2); ball.scale.set(6.5 * grow * s, 2.4 * grow * s, 6.5 * grow * s); ball.position.y = 2; }
-        else { ball.scale.setScalar(1); ball.rotation.x = t * 8; }
+        if (h.landed) { const s = 1 + Math.sin(t * 3) * 0.05, grow = Math.min(1, (h.t - 0.65) / 0.25); ball.scale.set(4.6 * grow * s, 1.6 * grow * s, 4.6 * grow * s); ball.position.y = 4; ball.rotation.y = t * 0.3; }
+        else { ball.scale.setScalar(1); ball.rotation.y = t * 3; }
       }
     }
     for (const [id, m] of hazMeshes) if (!seen.has(id)) { itemGroup.remove(m); hazMeshes.delete(id); }
@@ -2033,22 +2089,25 @@ const Gfx = (() => {
       const roll = clamp(-(k.lat || 0) * 0.00035 - (k.steerVis || 0) * Math.abs(k.fwd) / MAX_SPEED * 0.05, -0.12, 0.12);
       v.body.rotation.x = lerp(v.body.rotation.x, roll, Math.min(1, dt * 8));
       v.body.rotation.z = lerp(v.body.rotation.z, k.boost > 0 ? 0.035 : 0, Math.min(1, dt * 5));
-      // 캐릭터 애니메이션: 고개 까딱, 귀 흔들림, 눈 깜빡임, 표정
+      // 세포 애니메이션: 말랑말랑 출렁임, 머리 장식, 눈 깜빡임, 표정
       const a = v.anim;
       if (a) {
         const t = performance.now() / 1000 + a.seed, sp = Math.min(1, Math.abs(k.fwd) / MAX_SPEED);
-        a.head.position.y = 25.6 + Math.sin(t * 6) * 0.25;
-        a.head.rotation.z = Math.sin(t * 2.3) * 0.05 + sp * 0.06;
-        a.head.rotation.x = lerp(a.head.rotation.x, -(k.steerVis || 0) * 0.16, Math.min(1, dt * 6));
+        const wob = Math.sin(t * 7) * 0.02 + (k.boost > 0 ? Math.sin(t * 22) * 0.025 : 0);
+        a.head.position.y = a.headY + Math.sin(t * 6) * 0.3;
+        a.head.scale.set(1 + wob, 1 - wob, 1 + wob);
+        a.head.rotation.z = Math.sin(t * 2.3) * 0.05 + sp * 0.08;
+        a.head.rotation.x = lerp(a.head.rotation.x, -(k.steerVis || 0) * 0.18, Math.min(1, dt * 6));
         for (const e of a.ears) {
-          if (e.antenna) { e.g.scale.setScalar(1 + Math.sin(t * 5) * 0.12); continue; }
-          if (e.bob) { e.g.position.y = e.y0 + Math.sin(t * 6 + e.side) * 0.3; continue; }
-          const amp = e.small ? 0.04 : 0.09;
-          e.g.rotation.z = e.base.z + Math.sin(t * 5 + e.side) * amp + sp * (e.small ? 0.05 : 0.45);
-          e.g.rotation.x = e.base.x + Math.sin(t * 3.7 + e.side * 2) * amp * 0.6;
+          if (e.flame) { const f = 1 + Math.sin(t * 14 + e.seed) * 0.12 + sp * 0.25; e.g.scale.set(e.base.x * (2 - f) * 0.5 + e.base.x * 0.5, e.base.y * f, e.base.z); continue; }
+          if (e.bob) { e.g.position.y = e.y0 + Math.abs(Math.sin(t * 5)) * 0.6; continue; }
+          if (e.beat) { const b2 = (t * 1.6) % 1, s2 = 1 + (b2 < 0.12 ? Math.sin(b2 / 0.12 * PI) * 0.25 : b2 > 0.2 && b2 < 0.32 ? Math.sin((b2 - 0.2) / 0.12 * PI) * 0.18 : 0); e.g.scale.setScalar(s2); e.g.rotation.z = Math.sin(t * 3) * 0.2; continue; }
+          if (e.glow) { e.g.scale.setScalar(1 + Math.sin(t * 4) * 0.06); continue; }
+          e.g.rotation.z = e.base.z + Math.sin(t * 3) * 0.15 + sp * 0.4;
         }
         let m = 'base';
-        if (k.moodT > 0) m = k.mood;
+        if (k.bubble > 0) m = 'sleep';
+        else if (k.moodT > 0) m = k.mood;
         else if (game.state === 'menu') m = ['base', 'wink', 'joy'][Math.floor(t * 0.45) % 3];
         else if (k.finished) m = k.finalMood || 'joy';
         else if (game.state === 'countdown') m = 'wink';
@@ -2123,10 +2182,17 @@ function render(dt) {
 }
 
 function drawNameTags() {
-  ctx.textAlign = 'center'; ctx.font = 'bold 13px sans-serif';
+  ctx.textAlign = 'center';
+  for (const k of game.karts) {
+    if (k.bubble > 0) {
+      const q = Gfx.project(k.x, 52 + (k.z || 0), k.y);
+      if (q && q.d < 900) { const tt = performance.now() / 400; ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#c9bdff'; ctx.fillText('Z', q.x + 12, q.y - (tt % 1) * 10); ctx.font = 'bold 15px sans-serif'; ctx.fillText('z', q.x + 24, q.y - 14 - ((tt + 0.5) % 1) * 10); }
+    }
+  }
+  ctx.font = 'bold 13px sans-serif';
   for (const k of game.karts) {
     if (k.isPlayer) continue;
-    const p = Gfx.project(k.x, 34, k.y);
+    const p = Gfx.project(k.x, 46 + (k.z || 0), k.y);
     if (!p || p.d > 900) continue;
     const a = clamp(1.2 - p.d / 900, 0, 1);
     ctx.globalAlpha = a;
@@ -2271,7 +2337,7 @@ function drawHUD() {
     const gr = ctx.createRadialGradient(VW / 2, VH / 2, Math.min(VW, VH) * 0.35, VW / 2, VH / 2, Math.hypot(VW, VH) * 0.6);
     gr.addColorStop(0, 'rgba(255,0,0,0)'); gr.addColorStop(1, 'rgba(255,40,40,0.45)');
     ctx.fillStyle = gr; ctx.fillRect(0, 0, VW, VH);
-    ctx.font = `bold ${small ? 22 : 30}px sans-serif`; ctx.fillStyle = '#ff3b3b'; ctx.textAlign = 'center'; ctx.fillText('⚠ 미사일 접근!', VW / 2, VH * 0.2 + 40);
+    ctx.font = `bold ${small ? 22 : 30}px sans-serif`; ctx.fillStyle = '#ff3b3b'; ctx.textAlign = 'center'; ctx.fillText('⚠ 두근 화살 접근!', VW / 2, VH * 0.2 + 40);
   }
   if (p.offTime > 1.2 && !p.finished && game.state === 'race') {
     const t = !touchEl.classList.contains('hidden') ? '복귀 버튼으로 트랙에 돌아갈 수 있어요' : 'T 키를 누르면 트랙으로 돌아가요';
@@ -2627,10 +2693,10 @@ function applyEvent(e) {
   if (e.k === 'hz' && e.h && typeof e.h.id === 'string' && ITEM_DEFS[e.h.kind]) {
     const h = e.h;
     addHazard({ id: h.id, kind: h.kind, owner: String(h.owner || ''), target: String(h.target || ''), t: 0, x: +h.x || 0, y: +h.y || 0, vx: +h.vx || 0, vy: +h.vy || 0 }, false);
-    if (h.kind === 'missile' && h.target === Net.myId) { Sound.whoosh(0.6, 0.4, 300); message('⚠ 미사일이 날아와요!', '#ff5d73', 1.2); }
+    if (h.kind === 'missile' && h.target === Net.myId) { Sound.whoosh(0.6, 0.4, 300); message('⚠ 두근 화살이 날아와요!', '#ff5d73', 1.2); }
   } else if (e.k === 'rm' && typeof e.id === 'string') {
     const h = game.hazards.find(q => q.id === e.id);
-    if (h && h.kind === 'missile') explosion(h.x, h.y);
+    if (h && h.kind === 'missile') heartBurst(h.x, h.y);
     removeHazard(e.id, false);
   }
 }
